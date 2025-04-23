@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+
+package envoy.service.ext_proc.v3;
+
+option go_package = "protobuf/extproc";
+
+
+service ExternalProcessor {
+  // 双向流式 RPC，处理 HTTP 请求和响应
+  rpc Process(stream ProcessingRequest) returns (stream ProcessingResponse) {}
+}
+
+// ProcessingRequest 表示 gRPC 服务的请求
+message ProcessingRequest {
+  oneof request {
+    HttpHeaders request_headers = 1;
+    HttpBody request_body = 2;
+    HttpHeaders response_headers = 3;
+    HttpBody response_body = 4;
+    HttpTrailers request_trailers = 5;
+    HttpTrailers response_trailers = 6;
+  }
+}
+
+// ProcessingResponse 表示 gRPC 服务的响应
+message ProcessingResponse {
+  oneof response {
+    HeadersResponse request_headers = 1;
+    BodyResponse request_body = 2;
+    HeadersResponse response_headers = 3;
+    BodyResponse response_body = 4;
+    TrailersResponse request_trailers = 5;
+    TrailersResponse response_trailers = 6;
+    ImmediateResponse immediate_response = 7;
+  }
+}
+
+// HttpHeaders 表示 HTTP header 数据
+message HttpHeaders {
+  repeated HeaderValue headers = 1;
+  bool end_of_stream = 2;
+}
+
+// HttpBody 表示 HTTP body 数据
+message HttpBody {
+  bytes body = 1;
+  bool end_of_stream = 2;
+}
+
+// HttpTrailers 表示 HTTP trailers 数据
+message HttpTrailers {
+  repeated HeaderValue trailers = 1;
+}
+
+// HeadersResponse 表示对 header 的处理结果
+message HeadersResponse {
+  CommonResponse response = 1;
+}
+
+// BodyResponse 表示对 body 的处理结果
+message BodyResponse {
+  CommonResponse response = 1;
+}
+
+// TrailersResponse 表示对 trailers 的处理结果
+message TrailersResponse {
+  CommonResponse response = 1;
+}
+
+// CommonResponse 定义通用的响应操作
+message CommonResponse {
+  HeaderMutation header_mutation = 1;
+  BodyMutation body_mutation = 2;
+  ImmediateResponse immediate_response = 3;
+}
+
+// HeaderMutation 定义 header 或 trailers 修改操作
+message HeaderMutation {
+  repeated HeaderValueOption set_headers = 1;
+  repeated string remove_headers = 2;
+}
+
+// HeaderValueOption 表示设置 header 或 trailers 的选项
+message HeaderValueOption {
+  HeaderValue header = 1;
+}
+
+// HeaderValue 表示单个 header 或 trailer 键值对
+message HeaderValue {
+  string key = 1;
+  string value = 2;
+}
+
+// BodyMutation 定义 body 修改操作
+message BodyMutation {
+  bytes body = 1;
+}
+
+// ImmediateResponse 定义立即响应
+message ImmediateResponse {
+  int32 status_code = 1;
+  repeated HeaderValue headers = 2;
+  string body = 3;
+}
