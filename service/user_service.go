@@ -246,7 +246,7 @@ func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken strin
 	var user models.User
 	err = us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
 	if err == gorm.ErrRecordNotFound {
-		return nil, nil
+		return nil, err
 	}
 	if err != nil {
 		logrus.Errorf("Error querying user by inner token: %v", err)

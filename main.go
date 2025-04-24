@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
-	v32 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 )
 
 type extProcServer struct {
@@ -22,11 +23,11 @@ type extProcServer struct {
 }
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
-	log.Println("New stream from Envoy")
 	timeA := time.Now()
 	defer func() {
 		log.Printf("Stream closed after %s", time.Since(timeA))
 	}()
+
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
@@ -34,6 +35,10 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			return nil
 		}
 		if err != nil {
+			if status.Code(err) == codes.Canceled {
+				log.Println("Stream closed by envoy")
+				return nil
+			}
 			log.Printf("Error receiving from stream: %v", err)
 			return err
 		}
@@ -46,7 +51,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			isAuthHeaderExisted := false
 
 			for _, h := range headers.Headers {
-				if strings.ToLower(h.Key) == "authorization" {
+				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
 					orgAuth := string(h.RawValue)
@@ -55,36 +60,21 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					isValid, err := userService.ParseRequestToken(ctx, orgAuth)
 					if err != nil {
 						log.Printf("Error parsing token: %v", err)
-						resp := &extprocv3.ProcessingResponse{
-							Response: &extprocv3.ProcessingResponse_ImmediateResponse{
-								ImmediateResponse: &extprocv3.ImmediateResponse{
-									Status: &v32.HttpStatus{
-										Code: v32.StatusCode_Unauthorized,
-									},
-									Body: "Invalid token: access denied",
-									Headers: &extprocv3.HeaderMutation{
-										SetHeaders: []*corev3.HeaderValueOption{
-											{
-												Header: &corev3.HeaderValue{
-													Key:      "Content-Type",
-													RawValue: []byte("text/plain"),
-												},
-											},
-										},
-									},
-								},
-							},
-						}
-
+						resp := service.GetResponseForErr(err)
 						// 发送响应，终止流程
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
 						}
-
 					}
-					if isValid {
-						log.Printf("Token is valid: %s", orgAuth)
+					if !isValid {
+						log.Println("Token not valid")
+						resp := service.GetExpireError()
+						// 发送响应，终止流程
+						if err := stream.Send(resp); err != nil {
+							log.Printf("Failed to send immediate response: %v", err)
+						}
 					}
+					log.Printf("Token valid: %s\n", orgAuth)
 				}
 			}
 
@@ -131,7 +121,18 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			}
 		case *extprocv3.ProcessingRequest_ResponseHeaders:
 			log.Println("Received response headers")
-			resp := &extprocv3.ProcessingResponse{}
+			resp := &extprocv3.ProcessingResponse{
+				Response: &extprocv3.ProcessingResponse_ResponseHeaders{
+					ResponseHeaders: &extprocv3.HeadersResponse{
+						Response: &extprocv3.CommonResponse{
+							HeaderMutation: &extprocv3.HeaderMutation{
+								RemoveHeaders: []string{"authorization"},
+								SetHeaders:    []*corev3.HeaderValueOption{},
+							},
+						},
+					},
+				},
+			}
 			if err := stream.Send(resp); err != nil {
 				log.Printf("Error sending response: %v", err)
 				return err
