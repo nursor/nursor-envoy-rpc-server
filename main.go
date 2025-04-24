@@ -1,14 +1,15 @@
-package test
+package main
 
 import (
 	"io"
 	"log"
 	"net"
+	"nursor-envoy-rpc/service"
 	"strings"
-	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
@@ -20,7 +21,6 @@ type extProcServer struct {
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
 	log.Println("New stream from Envoy")
-
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
@@ -43,6 +43,17 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				if strings.ToLower(h.Key) == "authorization" {
 					modified = true
 					log.Println("Authorization header found and replaced")
+					orgAuth := string(h.RawValue)
+					userService := service.GetUserServiceInstance()
+					ctx := stream.Context()
+					isValid, err := userService.ParseRequestToken(ctx, orgAuth)
+					if err != nil {
+						log.Printf("Error parsing token: %v", err)
+						return err
+					}
+					if isValid {
+						log.Printf("Token is valid: %s", orgAuth)
+					}
 				}
 			}
 
@@ -57,11 +68,10 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 									SetHeaders: []*corev3.HeaderValueOption{
 										{
 											Header: &corev3.HeaderValue{
-												Key: "authorization",
-												// Value: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NDU0NzMzNzEiLCJyYW5kb21uZXNzIjoiNjJkYzFmMjQtYmI2MS00YWUxIiwiZXhwIjoxNzUwNjU3MzcxLCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20ifQ.MLmGo_4kPsGOEqwl0VE3hi2RGSnSZwbE3hsMBkGDIes",
+												Key:      "authorization",
 												RawValue: []byte("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NDU0NzMzNzEiLCJyYW5kb21uZXNzIjoiNjJkYzFmMjQtYmI2MS00YWUxIiwiZXhwIjoxNzUwNjU3MzcxLCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20ifQ.MLmGo_4kPsGOEqwl0VE3hi2RGSnSZwbE3hsMBkGDIes"),
 											},
-											// Append: wrapperspb.Bool(false),
+											Append: wrapperspb.Bool(false),
 										},
 									},
 								},
@@ -78,22 +88,11 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 		default:
 			// 其他阶段暂不处理
 			log.Printf("Unhandled request type: %T", r)
-			resp := &extprocv3.ProcessingResponse{
-				Response: &extprocv3.ProcessingResponse_RequestHeaders{
-					RequestHeaders: &extprocv3.HeadersResponse{
-						Response: &extprocv3.CommonResponse{},
-					},
-				},
-			}
-			if err := stream.Send(resp); err != nil {
-				log.Printf("Error sending response: %v", err)
-				return err
-			}
 		}
 	}
 }
 
-func TestRunner(t *testing.T) {
+func main() {
 	listenAddr := ":8080"
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
