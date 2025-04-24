@@ -4,8 +4,8 @@ import (
 	"io"
 	"log"
 	"net"
-	"nursor-envoy-rpc/service"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -21,6 +21,10 @@ type extProcServer struct {
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
 	log.Println("New stream from Envoy")
+	timeA := time.Now()
+	defer func() {
+		log.Printf("Stream closed after %s", time.Since(timeA))
+	}()
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
@@ -37,34 +41,40 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			log.Println("Received headers")
 
 			headers := r.RequestHeaders.GetHeaders()
-			modified := false
+			isAuthHeaderExisted := false
 
 			for _, h := range headers.Headers {
 				if strings.ToLower(h.Key) == "authorization" {
-					modified = true
+					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
-					orgAuth := string(h.RawValue)
-					userService := service.GetUserServiceInstance()
-					ctx := stream.Context()
-					isValid, err := userService.ParseRequestToken(ctx, orgAuth)
-					if err != nil {
-						log.Printf("Error parsing token: %v", err)
-						return err
-					}
-					if isValid {
-						log.Printf("Token is valid: %s", orgAuth)
-					}
+					// orgAuth := string(h.RawValue)
+					// userService := service.GetUserServiceInstance()
+					// ctx := stream.Context()
+					// isValid, err := userService.ParseRequestToken(ctx, orgAuth)
+					// if err != nil {
+					// 	log.Printf("Error parsing token: %v", err)
+					// 	return err
+					// }
+					// if isValid {
+					// 	log.Printf("Token is valid: %s", orgAuth)
+					// }
 				}
 			}
 
-			if !modified {
+			if !isAuthHeaderExisted {
 				log.Println("Authorization header not present")
+				resp := &extprocv3.ProcessingResponse{}
+				if err := stream.Send(resp); err != nil {
+					log.Printf("Error sending response: %v", err)
+					return err
+				}
 			} else {
 				resp := &extprocv3.ProcessingResponse{
 					Response: &extprocv3.ProcessingResponse_RequestHeaders{
 						RequestHeaders: &extprocv3.HeadersResponse{
 							Response: &extprocv3.CommonResponse{
 								HeaderMutation: &extprocv3.HeaderMutation{
+									RemoveHeaders: []string{"authorization"},
 									SetHeaders: []*corev3.HeaderValueOption{
 										{
 											Header: &corev3.HeaderValue{
@@ -85,9 +95,21 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				}
 				log.Println("Authorization header replaced")
 			}
+		case *extprocv3.ProcessingRequest_RequestBody:
+			log.Println("Received body")
+			resp := &extprocv3.ProcessingResponse{}
+			if err := stream.Send(resp); err != nil {
+				log.Printf("Error sending response: %v", err)
+				return err
+			}
 		default:
 			// 其他阶段暂不处理
-			log.Printf("Unhandled request type: %T", r)
+			log.Printf("Unhandled request type: %T (raw: %+v)", r, req)
+			resp := &extprocv3.ProcessingResponse{}
+			if err := stream.Send(resp); err != nil {
+				log.Printf("Error sending response: %v", err)
+				return err
+			}
 		}
 	}
 }

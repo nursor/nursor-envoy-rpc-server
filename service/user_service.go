@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"nursor-envoy-rpc/models"
 	"strings"
@@ -91,9 +92,9 @@ func (us *UserService) ParseRequestToken(ctx context.Context, authrozationValue 
 		return false, err
 	}
 	if userInfo == nil {
-		return true, nil
+		return false, errors.New("user not found")
 	}
-	return false, nil
+	return true, nil
 }
 
 // GetUserByToken retrieves user information by access token, using Redis cache.
