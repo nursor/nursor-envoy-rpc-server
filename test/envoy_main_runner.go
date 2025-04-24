@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"io"
@@ -41,29 +41,46 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 
 			for _, h := range headers.Headers {
 				if strings.ToLower(h.Key) == "authorization" {
-					h.Value = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NDUwNDM3NzUiLCJyYW5kb21uZXNzIjoiZTNlODkzYzAtMDQyNS00N2U0IiwiZXhwIjoxNzUwMjI3Nzc1LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20ifQ.M-SJquTllJFLwMMb7PrrrMwy3oBd-9wPgqsGOxRVxPc"
 					modified = true
 					log.Println("Authorization header found and replaced")
 				}
 			}
 
-			// Response to Envoy
-			resp := &extprocv3.ProcessingResponse{
-				Response: &extprocv3.ProcessingResponse_RequestHeaders{
-					RequestHeaders: &extprocv3.HeadersResponse{
-						Response: &extprocv3.CommonResponse{
-							HeaderMutation: &extprocv3.HeaderMutation{
-								SetHeaders: []*corev3.HeaderValueOption{
-									{
-										Header: &corev3.HeaderValue{
-											Key:   "authorization",
-											Value: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NDUwNDM3NzUiLCJyYW5kb21uZXNzIjoiZTNlODkzYzAtMDQyNS00N2U0IiwiZXhwIjoxNzUwMjI3Nzc1LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20ifQ.M-SJquTllJFLwMMb7PrrrMwy3oBd-9wPgqsGOxRVxPc",
+			if !modified {
+				log.Println("Authorization header not present")
+			} else {
+				resp := &extprocv3.ProcessingResponse{
+					Response: &extprocv3.ProcessingResponse_RequestHeaders{
+						RequestHeaders: &extprocv3.HeadersResponse{
+							Response: &extprocv3.CommonResponse{
+								HeaderMutation: &extprocv3.HeaderMutation{
+									SetHeaders: []*corev3.HeaderValueOption{
+										{
+											Header: &corev3.HeaderValue{
+												Key:   "authorization",
+												Value: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NDU0NzMzNzEiLCJyYW5kb21uZXNzIjoiNjJkYzFmMjQtYmI2MS00YWUxIiwiZXhwIjoxNzUwNjU3MzcxLCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20ifQ.MLmGo_4kPsGOEqwl0VE3hi2RGSnSZwbE3hsMBkGDIes",
+											},
+											Append: wrapperspb.Bool(false),
 										},
-										Append: wrapperspb.Bool(false),
 									},
 								},
 							},
 						},
+					},
+				}
+				if err := stream.Send(resp); err != nil {
+					log.Printf("Error sending response: %v", err)
+					return err
+				}
+				log.Println("Authorization header replaced")
+			}
+		default:
+			// 其他阶段暂不处理
+			log.Printf("Unhandled request type: %T", r)
+			resp := &extprocv3.ProcessingResponse{
+				Response: &extprocv3.ProcessingResponse_RequestHeaders{
+					RequestHeaders: &extprocv3.HeadersResponse{
+						Response: &extprocv3.CommonResponse{},
 					},
 				},
 			}
@@ -71,13 +88,6 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				log.Printf("Error sending response: %v", err)
 				return err
 			}
-
-			if !modified {
-				log.Println("Authorization header not present")
-			}
-		default:
-			// 其他阶段暂不处理
-			log.Printf("Unhandled request type: %T", r)
 		}
 	}
 }

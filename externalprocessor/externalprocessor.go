@@ -14,6 +14,7 @@ import (
 )
 
 type (
+	Attributes         = extproc.Attributes
 	BodyMutation       = extproc.BodyMutation
 	BodyResponse       = extproc.BodyResponse
 	CommonResponse     = extproc.CommonResponse
@@ -25,12 +26,13 @@ type (
 	HttpHeaders        = extproc.HttpHeaders
 	HttpTrailers       = extproc.HttpTrailers
 	ImmediateResponse  = extproc.ImmediateResponse
+	ProcessingMode     = extproc.ProcessingMode
 	ProcessingRequest  = extproc.ProcessingRequest
 	ProcessingResponse = extproc.ProcessingResponse
 	TrailersResponse   = extproc.TrailersResponse
 
 	ExternalProcessor interface {
-		// 双向流式 RPC，处理 HTTP 请求和响应
+		// 双向流式 RPC，处理 HTTP 请求和响应的各阶段
 		Process(ctx context.Context, opts ...grpc.CallOption) (extproc.ExternalProcessor_ProcessClient, error)
 	}
 
@@ -45,7 +47,7 @@ func NewExternalProcessor(cli zrpc.Client) ExternalProcessor {
 	}
 }
 
-// 双向流式 RPC，处理 HTTP 请求和响应
+// 双向流式 RPC，处理 HTTP 请求和响应的各阶段
 func (m *defaultExternalProcessor) Process(ctx context.Context, opts ...grpc.CallOption) (extproc.ExternalProcessor_ProcessClient, error) {
 	client := extproc.NewExternalProcessorClient(m.cli.Conn())
 	return client.Process(ctx, opts...)

@@ -22,7 +22,7 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ExternalProcessorClient interface {
-	// 双向流式 RPC，处理 HTTP 请求和响应
+	// 双向流式 RPC，处理 HTTP 请求和响应的各阶段
 	Process(ctx context.Context, opts ...grpc.CallOption) (ExternalProcessor_ProcessClient, error)
 }
 
@@ -69,7 +69,7 @@ func (x *externalProcessorProcessClient) Recv() (*ProcessingResponse, error) {
 // All implementations must embed UnimplementedExternalProcessorServer
 // for forward compatibility
 type ExternalProcessorServer interface {
-	// 双向流式 RPC，处理 HTTP 请求和响应
+	// 双向流式 RPC，处理 HTTP 请求和响应的各阶段
 	Process(ExternalProcessor_ProcessServer) error
 	mustEmbedUnimplementedExternalProcessorServer()
 }

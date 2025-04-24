@@ -21,7 +21,7 @@ func NewExternalProcessorServer(svcCtx *svc.ServiceContext) *ExternalProcessorSe
 	}
 }
 
-// 双向流式 RPC，处理 HTTP 请求和响应
+// 双向流式 RPC，处理 HTTP 请求和响应的各阶段
 func (s *ExternalProcessorServer) Process(stream extproc.ExternalProcessor_ProcessServer) error {
 	l := logic.NewProcessLogic(stream.Context(), s.svcCtx)
 	return l.Process(stream)
