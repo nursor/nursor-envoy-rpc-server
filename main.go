@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"nursor-envoy-rpc/service"
+	"nursor-envoy-rpc/utils"
 	"strings"
 	"time"
 
@@ -60,7 +61,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					isValid, err := userService.ParseRequestToken(ctx, orgAuth)
 					if err != nil {
 						log.Printf("Error parsing token: %v", err)
-						resp := service.GetResponseForErr(err)
+						resp := utils.GetResponseForErr(err)
 						// 发送响应，终止流程
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
@@ -68,7 +69,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					}
 					if !isValid {
 						log.Println("Token not valid")
-						resp := service.GetExpireError()
+						resp := utils.GetExpireError()
 						// 发送响应，终止流程
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
