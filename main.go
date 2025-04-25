@@ -4,6 +4,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"nursor-envoy-rpc/models/nursor"
+	"nursor-envoy-rpc/provider"
 	"nursor-envoy-rpc/service"
 	"nursor-envoy-rpc/utils"
 	"strings"
@@ -24,9 +26,13 @@ type extProcServer struct {
 }
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
+	var httpRecrod = nursor.NewRequestRecord()
 	timeA := time.Now()
 	defer func() {
 		log.Printf("Stream closed after %s", time.Since(timeA))
+		if httpRecrod != nil {
+			go provider.PushHttpRequestToDB(httpRecrod)
+		}
 	}()
 
 	for {
@@ -47,11 +53,11 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 		switch r := req.Request.(type) {
 		case *extprocv3.ProcessingRequest_RequestHeaders:
 			log.Println("Received request headers")
-
 			headers := r.RequestHeaders.GetHeaders()
 			isAuthHeaderExisted := false
 
 			for _, h := range headers.Headers {
+				httpRecrod.AddRequestHeader(h.Key, string(h.RawValue))
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
@@ -115,6 +121,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			}
 		case *extprocv3.ProcessingRequest_RequestBody:
 			log.Println("Received request body")
+			body := r.RequestBody.GetBody()
+			httpRecrod.AddRequestBody(body)
 			resp := &extprocv3.ProcessingResponse{}
 			if err := stream.Send(resp); err != nil {
 				log.Printf("Error sending response: %v", err)
@@ -122,6 +130,10 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			}
 		case *extprocv3.ProcessingRequest_ResponseHeaders:
 			log.Println("Received response headers")
+			headers := r.ResponseHeaders.GetHeaders()
+			for _, h := range headers.Headers {
+				httpRecrod.AddResponseHeader(h.Key, string(h.RawValue))
+			}
 			resp := &extprocv3.ProcessingResponse{
 				Response: &extprocv3.ProcessingResponse_ResponseHeaders{
 					ResponseHeaders: &extprocv3.HeadersResponse{
@@ -140,6 +152,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			}
 		case *extprocv3.ProcessingRequest_ResponseBody:
 			log.Println("Received response body")
+			body := r.ResponseBody.GetBody()
+			httpRecrod.AddResponseBody(body)
 			resp := &extprocv3.ProcessingResponse{}
 			if err := stream.Send(resp); err != nil {
 				log.Printf("Error sending response: %v", err)
