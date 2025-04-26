@@ -1,4 +1,4 @@
-package service
+package helper
 
 import (
 	"context"
@@ -24,8 +24,6 @@ type RedisOperator struct {
 	initialized      bool
 }
 
-// TokenPersistent defines the interface for token persistence (equivalent to Python's TokenPersistent).
-
 // singleton redisOperatorInstance
 var redisOperatorInstance *RedisOperator
 var redisOnce sync.Once
@@ -33,7 +31,7 @@ var redisOnce sync.Once
 // GetInstanceRedisOperator returns the singleton instance of RedisOperator.
 func GetInstanceRedisOperator() *RedisOperator {
 	redisOnce.Do(func() {
-		redisClient := getNewRedis()
+		redisClient := GetNewRedis()
 		redisOperatorInstance = &RedisOperator{}
 		redisOperatorInstance.initialize(redisClient)
 	})
@@ -47,7 +45,7 @@ func (ro *RedisOperator) initialize(redisClient *redis.Client) {
 	}
 
 	if redisClient == nil {
-		redisClient = getNewRedis() // Assume this function exists to get a new Redis client
+		redisClient = GetNewRedis() // Assume this function exists to get a new Redis client
 	}
 
 	ro.redis = redisClient
@@ -73,7 +71,7 @@ func ResetRedisInstance() {
 // HandleNewUser processes a new user and assigns a token if needed.
 func (ro *RedisOperator) HandleNewUser(ctx context.Context, userID string) (string, error) {
 	tokenID, err := ro.GetTokenID(ctx, userID)
-	if err != nil {
+	if err != nil && err != redis.Nil {
 		return "", err
 	}
 	if tokenID != "" {
@@ -533,8 +531,8 @@ func (ro *RedisOperator) AddModelUsage(ctx context.Context, userID, modelName st
 	return true, nil
 }
 
-// getNewRedis is a placeholder for getting a new Redis client (implement as needed).
-func getNewRedis() *redis.Client {
+// GetNewRedis is a placeholder for getting a new Redis client (implement as needed).
+func GetNewRedis() *redis.Client {
 	// Implement Redis client initialization
 	return redis.NewClient(&redis.Options{
 		Addr: "172.16.238.2:30706",

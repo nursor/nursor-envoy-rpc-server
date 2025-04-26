@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"nursor-envoy-rpc/helper"
 	"sync"
 
 	"github.com/go-redis/redis/v8"
@@ -10,8 +11,8 @@ import (
 
 // DispatchService manages token dispatching and request recording.
 type DispatchService struct {
-	redisDispatcher *RedisOperator
-	tokenPersistent *TokenPersistent
+	redisDispatcher *helper.RedisOperator
+	tokenPersistent *helper.TokenPersistent
 	redis           *redis.Client
 	initialized     bool
 }
@@ -34,9 +35,9 @@ func (ds *DispatchService) initialize() {
 	if ds.initialized {
 		return
 	}
-	ds.redis = getNewRedis() // Assume this function exists
-	ds.redisDispatcher = GetInstanceRedisOperator()
-	ds.tokenPersistent = GetTPInstance()
+	ds.redis = helper.GetNewRedis() // Assume this function exists
+	ds.redisDispatcher = helper.GetInstanceRedisOperator()
+	ds.tokenPersistent = helper.GetTPInstance()
 	ds.initialized = true
 }
 

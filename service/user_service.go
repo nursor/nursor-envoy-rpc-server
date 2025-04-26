@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"nursor-envoy-rpc/helper"
 	"nursor-envoy-rpc/models"
 	"strings"
 	"sync"
@@ -32,9 +33,8 @@ var userOnce sync.Once
 // GetUserServiceInstance returns the singleton instance of UserService.
 func GetUserServiceInstance() *UserService {
 	userOnce.Do(func() {
-
-		db := getNewDB()
-		redisClient := getNewRedis()
+		db := helper.GetNewDB()
+		redisClient := helper.GetNewRedis()
 		userInstance = &UserService{}
 		userInstance.initialize(db, redisClient)
 	})
@@ -47,10 +47,10 @@ func (us *UserService) initialize(db *gorm.DB, redisClient *redis.Client) {
 		return
 	}
 	if redisClient == nil {
-		redisClient = getNewRedis() // Assume this function exists
+		redisClient = helper.GetNewRedis() // Assume this function exists
 	}
 	if db == nil {
-		db = getNewDB() // Assume this function exists
+		db = helper.GetNewDB() // Assume this function exists
 	}
 	us.defaultRedis = redisClient
 	us.db = db
@@ -60,16 +60,16 @@ func (us *UserService) initialize(db *gorm.DB, redisClient *redis.Client) {
 	us.initialized = true
 }
 
-// ParseRequestToken validates the token in an HTTP flow and sets user info.
-func (us *UserService) ParseRequestToken(ctx context.Context, authrozationValue string) (bool, error) {
+// GetUserFromInnerToken validates the token in an HTTP flow and sets user info.
+func (us *UserService) GetUserFromInnerToken(ctx context.Context, authrozationValue string) (*models.User, error) {
 	parts := strings.Split(authrozationValue, " ")
 	if len(parts) < 2 {
-		return true, nil
+		return nil, errors.New("invalid authorization header")
 	}
 	fakeInnerToken := parts[1]
 
 	if fakeInnerToken == "" {
-		return true, nil
+		return nil, errors.New("empty token")
 	}
 
 	// Extract inner token
@@ -79,26 +79,23 @@ func (us *UserService) ParseRequestToken(ctx context.Context, authrozationValue 
 	// Check token availability
 	isAvailable, err := us.IsUserAvailable(ctx, innerToken)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if !isAvailable {
 		logrus.Infof("Invalid or expired token: %s", innerToken)
-		return false, nil
+		return nil, errors.New("invalid or expired token")
 	}
 
-	// Get user information
-	userInfo, err := us.GetUserByInnerToken(ctx, innerToken)
+	userInfo, err := us.GetUserByIDFromDB(ctx, innerToken)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if userInfo == nil {
-		return false, errors.New("user not found")
-	}
-	return true, nil
+
+	return userInfo, nil
 }
 
-// GetUserByToken retrieves user information by access token, using Redis cache.
-func (us *UserService) GetUserByToken(ctx context.Context, userToken string) (map[string]interface{}, error) {
+// GetUserMapByToken retrieves user information by access token, using Redis cache.
+func (us *UserService) GetUserMapByToken(ctx context.Context, userToken string) (map[string]interface{}, error) {
 	cacheKey := fmt.Sprintf("%s:%s", us.userCachePrefix, userToken)
 	userInfoJSON, err := us.defaultRedis.Get(ctx, cacheKey).Result()
 	if err == nil && userInfoJSON != "" {
@@ -113,16 +110,10 @@ func (us *UserService) GetUserByToken(ctx context.Context, userToken string) (ma
 		logrus.Errorf("Error accessing Redis: %v", err)
 	}
 
-	var user models.User
-	err = us.db.WithContext(ctx).Where("access_token = ?", userToken).First(&user).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, nil
-	}
+	user, err := us.GetUserByIDFromDB(ctx, userToken)
 	if err != nil {
-		logrus.Errorf("Error querying user by token: %v", err)
 		return nil, err
 	}
-
 	userInfo := map[string]interface{}{
 		"id":           user.ID,
 		"access_token": user.AccessToken,
@@ -143,6 +134,24 @@ func (us *UserService) GetUserByToken(ctx context.Context, userToken string) (ma
 	}
 
 	return userInfo, nil
+}
+
+func (us *UserService) GetUserByIDFromDB(ctx context.Context, innerToken string) (*models.User, error) {
+	var user models.User
+	err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken string) (*models.User, error) {
+	var user models.User
+	err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }
 
 // GetUserByID retrieves user information by user ID, using Redis cache.
@@ -203,76 +212,21 @@ func (us *UserService) IsUserAvailable(ctx context.Context, innerToken string) (
 		return false, nil
 	}
 
-	usageFloat, _ := user["usage"].(float64)
-	usage := int(usageFloat)
-	limitFloat, _ := user["limit"].(float64)
-	limit := int(limitFloat)
+	usage := user.Usage
+	limit := user.Limit
 	if usage > limit {
 		return false, nil
 	}
 
-	expiredAtStr, ok := user["expired_at"].(string)
-	if !ok {
+	expiredAt := user.ExpiredAt
+	if expiredAt == nil {
 		return false, fmt.Errorf("invalid expired_at format")
-	}
-	expiredAt, err := time.Parse(time.RFC3339, expiredAtStr)
-	if err != nil {
-		logrus.Errorf("Error parsing expired_at: %v", err)
-		return false, err
 	}
 	if expiredAt.Before(time.Now().UTC()) {
 		return false, nil
 	}
 
 	return true, nil
-}
-
-// GetUserByInnerToken retrieves user information by inner token, using Redis cache.
-func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken string) (map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("%s:%s", us.userCachePrefix, innerToken)
-	userInfoJSON, err := us.defaultRedis.Get(ctx, cacheKey).Result()
-	if err == nil && userInfoJSON != "" {
-		var userInfo map[string]interface{}
-		if err := json.Unmarshal([]byte(userInfoJSON), &userInfo); err != nil {
-			logrus.Errorf("Error unmarshaling cached user info: %v", err)
-			return nil, err
-		}
-		return userInfo, nil
-	}
-	if err != redis.Nil {
-		logrus.Errorf("Error accessing Redis: %v", err)
-	}
-
-	var user models.User
-	err = us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, err
-	}
-	if err != nil {
-		logrus.Errorf("Error querying user by inner token: %v", err)
-		return nil, err
-	}
-
-	userInfo := map[string]interface{}{
-		"id":           user.ID,
-		"access_token": user.AccessToken,
-		"inner_token":  user.InnerToken,
-		"usage":        user.Usage,
-		"limit":        user.Limit,
-		"expired_at":   user.ExpiredAt,
-	}
-	userInfoJSONBytes, err := json.Marshal(userInfo)
-	if err != nil {
-		logrus.Errorf("Error marshaling user info: %v", err)
-		return userInfo, nil // Return user info anyway
-	}
-
-	err = us.defaultRedis.Set(ctx, cacheKey, string(userInfoJSONBytes), 30*time.Minute).Err()
-	if err != nil {
-		logrus.Errorf("Error caching user info: %v", err)
-	}
-
-	return userInfo, nil
 }
 
 // ResetInstance resets the singleton instance (mainly for testing).

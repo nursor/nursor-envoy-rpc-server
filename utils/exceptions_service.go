@@ -58,7 +58,7 @@ func GetResponseForErr(err error) *extprocv3.ProcessingResponse {
 
 }
 
-func GetExpireError() *extprocv3.ProcessingResponse {
+func GetResponseForExpireError() *extprocv3.ProcessingResponse {
 	return &extprocv3.ProcessingResponse{
 		Response: &extprocv3.ProcessingResponse_ImmediateResponse{
 			ImmediateResponse: &extprocv3.ImmediateResponse{

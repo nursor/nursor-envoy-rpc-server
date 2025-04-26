@@ -1,4 +1,4 @@
-package service
+package helper
 
 import (
 	"context"
@@ -25,7 +25,7 @@ var tpOnce sync.Once
 // GetTPInstance returns the singleton instance of TokenPersistent.
 func GetTPInstance() *TokenPersistent {
 	tpOnce.Do(func() {
-		db := getNewDB()
+		db := GetNewDB()
 		tpInstance = &TokenPersistent{}
 		tpInstance.initialize(db)
 	})
@@ -38,7 +38,7 @@ func (tp *TokenPersistent) initialize(db *gorm.DB) {
 		return
 	}
 	if db == nil {
-		db = getNewDB() // Assume this function exists to get a new GORM DB connection
+		db = GetNewDB() // Assume this function exists to get a new GORM DB connection
 	}
 	tp.db = db
 	tp.initialized = true
@@ -287,8 +287,8 @@ type TokenUnavailableReason struct {
 	ReasonType string
 }
 
-// getNewDB is a placeholder for getting a new GORM DB connection.
-func getNewDB() *gorm.DB {
+// GetNewDB is a placeholder for getting a new GORM DB connection.
+func GetNewDB() *gorm.DB {
 	// Implement GORM DB initialization (e.g., using models.InitDB)
 	dsn := "root:asd123456@tcp(172.16.238.2:30409)/nursor-test?charset=utf8mb4&parseTime=True&loc=Local"
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})

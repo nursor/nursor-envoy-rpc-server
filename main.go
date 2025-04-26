@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -35,6 +36,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 		}
 	}()
 
+	var cursorToken = ""
+
 	for {
 		req, err := stream.Recv()
 		if err == io.EOF {
@@ -64,7 +67,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					orgAuth := string(h.RawValue)
 					userService := service.GetUserServiceInstance()
 					ctx := stream.Context()
-					isValid, err := userService.ParseRequestToken(ctx, orgAuth)
+					userInfo, err := userService.GetUserFromInnerToken(ctx, orgAuth)
 					if err != nil {
 						log.Printf("Error parsing token: %v", err)
 						resp := utils.GetResponseForErr(err)
@@ -73,14 +76,25 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 							log.Printf("Failed to send immediate response: %v", err)
 						}
 					}
-					if !isValid {
+					if userInfo == nil {
 						log.Println("Token not valid")
-						resp := utils.GetExpireError()
+						resp := utils.GetResponseForExpireError()
 						// 发送响应，终止流程
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
 						}
 					}
+					httpRecrod.InnerToken = userInfo.InnerToken
+					cursorToken, err = service.GetDispatchInstance().DispatchTokenForNewUser(ctx, fmt.Sprint(userInfo.ID))
+					if err != nil {
+						log.Printf("Error dispatching token: %v", err)
+						resp := utils.GetResponseForErr(err)
+						// 发送响应，终止流程
+						if err := stream.Send(resp); err != nil {
+							log.Printf("Failed to send immediate response: %v", err)
+						}
+					}
+
 					log.Printf("Token valid: %s\n", orgAuth)
 				}
 			}
@@ -103,7 +117,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 										{
 											Header: &corev3.HeaderValue{
 												Key:      "authorization",
-												RawValue: []byte("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NDU0NzMzNzEiLCJyYW5kb21uZXNzIjoiNjJkYzFmMjQtYmI2MS00YWUxIiwiZXhwIjoxNzUwNjU3MzcxLCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20ifQ.MLmGo_4kPsGOEqwl0VE3hi2RGSnSZwbE3hsMBkGDIes"),
+												RawValue: []byte(fmt.Sprintf("Bearer %s", cursorToken)),
 											},
 											Append: wrapperspb.Bool(false),
 										},
