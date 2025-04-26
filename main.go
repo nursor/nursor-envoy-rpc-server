@@ -28,11 +28,15 @@ type extProcServer struct {
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
 	var httpRecrod = nursor.NewRequestRecord()
+	var isChatRequest = false
 	timeA := time.Now()
 	defer func() {
 		log.Printf("Stream closed after %s", time.Since(timeA))
 		if httpRecrod != nil {
 			go provider.PushHttpRequestToDB(httpRecrod)
+		}
+		if isChatRequest {
+			go service.GetTokenServiceInstance().IncrementTokenUsage(stream.Context(), httpRecrod.InnerToken)
 		}
 	}()
 
@@ -67,7 +71,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					orgAuth := string(h.RawValue)
 					userService := service.GetUserServiceInstance()
 					ctx := stream.Context()
-					userInfo, err := userService.GetUserFromInnerToken(ctx, orgAuth)
+					userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
 					if err != nil {
 						log.Printf("Error parsing token: %v", err)
 						resp := utils.GetResponseForErr(err)
@@ -83,8 +87,10 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
 						}
+					} else {
+						httpRecrod.InnerToken = userInfo.InnerToken
 					}
-					httpRecrod.InnerToken = userInfo.InnerToken
+
 					cursorToken, err = service.GetDispatchInstance().DispatchTokenForNewUser(ctx, fmt.Sprint(userInfo.ID))
 					if err != nil {
 						log.Printf("Error dispatching token: %v", err)
@@ -96,6 +102,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					}
 
 					log.Printf("Token valid: %s\n", orgAuth)
+				}
+				if strings.Contains(string(h.RawValue), "chat") {
+					isChatRequest = true
 				}
 			}
 

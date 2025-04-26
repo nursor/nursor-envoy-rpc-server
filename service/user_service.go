@@ -60,8 +60,8 @@ func (us *UserService) initialize(db *gorm.DB, redisClient *redis.Client) {
 	us.initialized = true
 }
 
-// GetUserFromInnerToken validates the token in an HTTP flow and sets user info.
-func (us *UserService) GetUserFromInnerToken(ctx context.Context, authrozationValue string) (*models.User, error) {
+// CheckAndGetUserFromInnerToken validates the token in an HTTP flow and sets user info.
+func (us *UserService) CheckAndGetUserFromInnerToken(ctx context.Context, authrozationValue string) (*models.User, error) {
 	parts := strings.Split(authrozationValue, " ")
 	if len(parts) < 2 {
 		return nil, errors.New("invalid authorization header")
@@ -86,7 +86,7 @@ func (us *UserService) GetUserFromInnerToken(ctx context.Context, authrozationVa
 		return nil, errors.New("invalid or expired token")
 	}
 
-	userInfo, err := us.GetUserByIDFromDB(ctx, innerToken)
+	userInfo, err := us.GetUserByInnerTokenFromDB(ctx, innerToken)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (us *UserService) GetUserMapByToken(ctx context.Context, userToken string) 
 		logrus.Errorf("Error accessing Redis: %v", err)
 	}
 
-	user, err := us.GetUserByIDFromDB(ctx, userToken)
+	user, err := us.GetUserByInnerTokenFromDB(ctx, userToken)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func (us *UserService) GetUserMapByToken(ctx context.Context, userToken string) 
 	return userInfo, nil
 }
 
-func (us *UserService) GetUserByIDFromDB(ctx context.Context, innerToken string) (*models.User, error) {
+func (us *UserService) GetUserByInnerTokenFromDB(ctx context.Context, innerToken string) (*models.User, error) {
 	var user models.User
 	err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
 	if err != nil {

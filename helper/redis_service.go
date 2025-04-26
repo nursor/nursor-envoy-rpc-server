@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -534,9 +535,13 @@ func (ro *RedisOperator) AddModelUsage(ctx context.Context, userID, modelName st
 // GetNewRedis is a placeholder for getting a new Redis client (implement as needed).
 func GetNewRedis() *redis.Client {
 	// Implement Redis client initialization
+	redisAddr := os.Getenv("REDIS_ADDR")
+	redisDB, _ := strconv.Atoi(os.Getenv("REDIS_DB"))
+	redisPassword := os.Getenv("REDIS_PASSWORD")
 	return redis.NewClient(&redis.Options{
-		Addr: "172.16.238.2:30706",
-		DB:   12,
+		Addr:     redisAddr,
+		DB:       redisDB,
+		Password: redisPassword,
 	})
 }
 
