@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"nursor-envoy-rpc/models"
 	"nursor-envoy-rpc/models/nursor"
 	"nursor-envoy-rpc/provider"
 	"nursor-envoy-rpc/service"
@@ -36,14 +37,16 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			go provider.PushHttpRequestToDB(httpRecrod)
 		}
 		if isChatRequest {
-			go service.GetTokenServiceInstance().IncrementTokenUsage(stream.Context(), httpRecrod.InnerToken)
+			// go service.GetTokenServiceInstance().IncrementTokenUsage(stream.Context(), httpRecrod.InnerTokenId)
 		}
 	}()
 
-	var cursorToken = ""
+	var cursorAccount *models.Cursor
 
 	for {
 		req, err := stream.Recv()
+		ctx := stream.Context()
+		// ctx := context.Background()
 		if err == io.EOF {
 			log.Println("Stream closed by client")
 			return nil
@@ -70,7 +73,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					log.Println("Authorization header found and replaced")
 					orgAuth := string(h.RawValue)
 					userService := service.GetUserServiceInstance()
-					ctx := stream.Context()
+
 					userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
 					if err != nil {
 						log.Printf("Error parsing token: %v", err)
@@ -79,6 +82,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
 						}
+						return err
 					}
 					if userInfo == nil {
 						log.Println("Token not valid")
@@ -87,25 +91,31 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
 						}
+						return err
 					} else {
-						httpRecrod.InnerToken = userInfo.InnerToken
+						httpRecrod.InnerTokenId = userInfo.InnerToken
 					}
-
-					cursorToken, err = service.GetDispatchInstance().DispatchTokenForNewUser(ctx, fmt.Sprint(userInfo.ID))
-					if err != nil {
+					dispatcherService := service.GetDispatchInstance()
+					cursorAccount, err = dispatcherService.DispatchTokenForUser(ctx, fmt.Sprint(userInfo.ID))
+					if err != nil || cursorAccount == nil {
 						log.Printf("Error dispatching token: %v", err)
 						resp := utils.GetResponseForErr(err)
 						// 发送响应，终止流程
 						if err := stream.Send(resp); err != nil {
 							log.Printf("Failed to send immediate response: %v", err)
 						}
+						return err
 					}
-
 					log.Printf("Token valid: %s\n", orgAuth)
 				}
-				if strings.Contains(string(h.RawValue), "chat") {
+				// 聊天请求单独处理
+				if strings.Contains(string(h.RawValue), "StreamUnifiedChatWithTools") {
 					isChatRequest = true
 				}
+			}
+			if isChatRequest {
+				dispatcherService := service.GetDispatchInstance()
+				dispatcherService.IncrTokenUsage(ctx, *cursorAccount.CursorID)
 			}
 
 			if !isAuthHeaderExisted {
@@ -126,7 +136,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 										{
 											Header: &corev3.HeaderValue{
 												Key:      "authorization",
-												RawValue: []byte(fmt.Sprintf("Bearer %s", cursorToken)),
+												RawValue: []byte(fmt.Sprintf("Bearer %s", *cursorAccount.AccessToken)),
 											},
 											Append: wrapperspb.Bool(false),
 										},

@@ -27,7 +27,7 @@ type HttpRecord struct {
 	Host            string            `json:"host"`
 	Datetime        string            `json:"datetime"`
 	HttpVersion     string            `json:"http_version"`
-	InnerToken      string            `json:"inner_token"`
+	InnerTokenId    string            `json:"inner_token_id"`
 }
 
 func NewRequestRecord() *HttpRecord {
@@ -41,7 +41,7 @@ func NewRequestRecord() *HttpRecord {
 		Host:            "cursor.sh",
 		Datetime:        time.Now().Format("2006-01-02 15:04:05"),
 		HttpVersion:     "http/1.1",
-		InnerToken:      "",
+		InnerTokenId:    "",
 	}
 }
 

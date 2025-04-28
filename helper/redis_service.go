@@ -56,7 +56,7 @@ func (ro *RedisOperator) initialize(redisClient *redis.Client) {
 	ro.tokenUsersPrefix = fmt.Sprintf("%s:token_users:", ro.appName)
 	ro.tokenUsagePrefix = fmt.Sprintf("%s:token_usage:", ro.appName)
 	ro.userUsagePrefix = fmt.Sprintf("%s:user_usage:", ro.appName)
-	ro.tokenListKey = "available_tokens"
+	ro.tokenListKey = fmt.Sprintf("%s:available_tokens", ro.appName)
 	ro.initialized = true
 
 	logrus.Info("RedisOperator singleton initialized")
@@ -67,28 +67,6 @@ func ResetRedisInstance() {
 	redisOnce = sync.Once{}
 	redisOperatorInstance = nil
 	logrus.Info("RedisOperator singleton has been reset")
-}
-
-// HandleNewUser processes a new user and assigns a token if needed.
-func (ro *RedisOperator) HandleNewUser(ctx context.Context, userID string) (string, error) {
-	tokenID, err := ro.GetTokenID(ctx, userID)
-	if err != nil && err != redis.Nil {
-		return "", err
-	}
-	if tokenID != "" {
-		return tokenID, nil
-	}
-
-	newTokenID, err := ro.AssignNewToken(ctx)
-	if err != nil || newTokenID == "" {
-		logrus.Errorf("Failed to assign token to user %s: %v", userID, err)
-		return "", err
-	}
-
-	if err := ro.SetToken(ctx, userID, newTokenID); err != nil {
-		return "", err
-	}
-	return newTokenID, nil
 }
 
 // BindingUserAndToken binds a user to a token.
@@ -106,8 +84,8 @@ func (ro *RedisOperator) BindingUserAndToken(ctx context.Context, userID, tokenI
 	return nil
 }
 
-// GetTokenID retrieves the token bound to a user.
-func (ro *RedisOperator) GetTokenID(ctx context.Context, userID string) (string, error) {
+// GetTokenIdByUserId retrieves the token bound to a user.
+func (ro *RedisOperator) GetTokenIdByUserId(ctx context.Context, userID string) (string, error) {
 	userKey := ro.userTokenPrefix + userID
 	tokenID, err := ro.redis.Get(ctx, userKey).Result()
 	if err == redis.Nil {
@@ -119,9 +97,9 @@ func (ro *RedisOperator) GetTokenID(ctx context.Context, userID string) (string,
 	return tokenID, nil
 }
 
-// SetToken sets a token for a user, removing old bindings if necessary.
-func (ro *RedisOperator) SetToken(ctx context.Context, userID, tokenID string) error {
-	oldToken, err := ro.GetTokenID(ctx, userID)
+// BindUserAndToken sets a token for a user, removing old bindings if necessary.
+func (ro *RedisOperator) BindUserAndToken(ctx context.Context, userID, tokenID string) error {
+	oldToken, err := ro.GetTokenIdByUserId(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -138,7 +116,7 @@ func (ro *RedisOperator) SetToken(ctx context.Context, userID, tokenID string) e
 
 // DeleteToken removes a user's token binding.
 func (ro *RedisOperator) DeleteToken(ctx context.Context, userID string) (int64, error) {
-	token, err := ro.GetTokenID(ctx, userID)
+	token, err := ro.GetTokenIdByUserId(ctx, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -165,19 +143,52 @@ func (ro *RedisOperator) IsTokenUnused(ctx context.Context, tokenID string) (boo
 	return count == 0, nil
 }
 
+func (ro *RedisOperator) GetMinBindingToken(ctx context.Context) (string, error) {
+	allTokens, err := ro.GetAvailableTokens(ctx)
+	if err != nil {
+		return "", err
+	}
+	minUsersCount := int64(^uint64(0) >> 1) // Max int64
+	var selectedToken string
+	for _, token := range allTokens {
+		tokenUsersKey := ro.tokenUsersPrefix + token
+		usersCount, err := ro.redis.SCard(ctx, tokenUsersKey).Result()
+		if err != nil {
+			return "", err
+		}
+		if usersCount < minUsersCount {
+			minUsersCount = usersCount
+			selectedToken = token
+		}
+	}
+
+	if selectedToken == "" {
+		logrus.Error("No available tokens, please replenish")
+		return "", nil
+	}
+
+	return selectedToken, nil
+
+}
+
 // HandleUserLeave cleans up records when a user leaves.
 func (ro *RedisOperator) HandleUserLeave(ctx context.Context, userID string) error {
 	_, err := ro.DeleteToken(ctx, userID)
 	return err
 }
 
+func (ro *RedisOperator) GetAvailableTokens(ctx context.Context) ([]string, error) {
+	return ro.redis.SMembers(ctx, ro.tokenListKey).Result()
+}
+
 // AssignNewToken assigns a token with the least bound users.
 func (ro *RedisOperator) AssignNewToken(ctx context.Context) (string, error) {
-	allTokens, err := ro.redis.SMembers(ctx, ro.tokenListKey).Result()
+	allTokens, err := ro.GetAvailableTokens(ctx)
 	if err != nil {
 		return "", err
 	}
 	if len(allTokens) == 0 {
+		// TODO: 没有可用token，需要补充
 		logrus.Error("No available tokens, please replenish")
 		return "", nil
 	}
@@ -206,18 +217,13 @@ func (ro *RedisOperator) AssignNewToken(ctx context.Context) (string, error) {
 }
 
 // IncrementTokenUsage increments token and user usage counts.
-func (ro *RedisOperator) IncrementTokenUsage(ctx context.Context, userID string, count int64) (bool, error) {
-	token, err := ro.GetTokenID(ctx, userID)
-	if err != nil || token == "" {
-		return false, err
-	}
-
-	tokenUsageKey := ro.tokenUsagePrefix + token
+func (ro *RedisOperator) IncrementTokenUsage(ctx context.Context, tokenID string, count int64) (bool, error) {
+	tokenUsageKey := ro.tokenUsagePrefix + tokenID
 	if err := ro.redis.IncrBy(ctx, tokenUsageKey, count).Err(); err != nil {
 		return false, err
 	}
 
-	userUsageKey := ro.userUsagePrefix + userID
+	userUsageKey := ro.userUsagePrefix + tokenID
 	if err := ro.redis.IncrBy(ctx, userUsageKey, count).Err(); err != nil {
 		return false, err
 	}
@@ -319,16 +325,16 @@ func (ro *RedisOperator) HandleTokenExpiration(ctx context.Context, expiredToken
 		}
 	}
 
-	newTokenID, err := ro.dbConnector.GetAvailableToken(ctx)
-	if err != nil || newTokenID == "" {
+	newTokenID, err := ro.dbConnector.GetAvailableTokenIdFromDB(ctx, 1)
+	if err != nil || len(newTokenID) == 0 {
 		return "", err
 	}
 
-	if err := ro.ReplaceOldToken(ctx, expiredTokenID, newTokenID); err != nil {
+	if err := ro.ReplaceOldToken(ctx, expiredTokenID, *newTokenID[0].CursorID); err != nil {
 		return "", err
 	}
 
-	return newTokenID, nil
+	return *newTokenID[0].CursorID, nil
 }
 
 // AddAvailableToken adds a token to the available tokens list.
@@ -417,7 +423,7 @@ func (ro *RedisOperator) GetTokenUsage(ctx context.Context, tokenID string) (int
 
 // AddURLRecords records a user's URL access.
 func (ro *RedisOperator) AddURLRecords(ctx context.Context, userID, url string, count int64) (bool, error) {
-	token, err := ro.GetTokenID(ctx, userID)
+	token, err := ro.GetTokenIdByUserId(ctx, userID)
 	if err != nil || token == "" {
 		logrus.Warnf("User %s has no bound token, cannot record URL access", userID)
 		return false, err
@@ -496,7 +502,7 @@ func (ro *RedisOperator) DeleteAuthToken(ctx context.Context, authToken string) 
 
 // AddModelUsage increments model usage counts for a user and token.
 func (ro *RedisOperator) AddModelUsage(ctx context.Context, userID, modelName string, count int64) (bool, error) {
-	token, err := ro.GetTokenID(ctx, userID)
+	token, err := ro.GetTokenIdByUserId(ctx, userID)
 	if err != nil || token == "" {
 		return false, err
 	}
@@ -536,7 +542,13 @@ func (ro *RedisOperator) AddModelUsage(ctx context.Context, userID, modelName st
 func GetNewRedis() *redis.Client {
 	// Implement Redis client initialization
 	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "172.16.238.2:30706"
+	}
 	redisDB, _ := strconv.Atoi(os.Getenv("REDIS_DB"))
+	if redisDB == 0 {
+		redisDB = 12
+	}
 	redisPassword := os.Getenv("REDIS_PASSWORD")
 	return redis.NewClient(&redis.Options{
 		Addr:     redisAddr,

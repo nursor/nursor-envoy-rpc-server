@@ -44,30 +44,25 @@ func (tp *TokenPersistent) initialize(db *gorm.DB) {
 	tp.initialized = true
 }
 
-// GetAvailableToken retrieves an available cursor token from the database.
-func (tp *TokenPersistent) GetAvailableToken(ctx context.Context) (string, error) {
-	var cursor models.Cursor
+// GetAvailableTokenIdFromDB retrieves an available cursor token from the database.
+func (tp *TokenPersistent) GetAvailableTokenIdFromDB(ctx context.Context, count int) ([]models.Cursor, error) {
+	var cursors []models.Cursor
 	currentTime := time.Now()
 	err := tp.db.WithContext(ctx).
 		Where("status = ? AND expires_at > ?", "active", currentTime).
-		Order("usage ASC, expires_at ASC").
-		First(&cursor).Error
+		Order("`usage` ASC, expires_at ASC").
+		Limit(count).
+		Find(&cursors).Error
 	if err == gorm.ErrRecordNotFound {
 		logrus.Warn("No available Cursor found")
-		return "", nil
+		return nil, nil
 	}
 	if err != nil {
 		logrus.Errorf("Error retrieving available token: %v", err)
-		return "", err
+		return nil, err
 	}
 
-	if cursor.CursorID == nil {
-		logrus.Warn("Cursor has no cursor_id")
-		return "", nil
-	}
-
-	logrus.Infof("Found available Cursor: ID=%d, Name=%s", cursor.ID, *cursor.Name)
-	return *cursor.CursorID, nil
+	return cursors, nil
 }
 
 // SaveTokenData saves token usage data from Redis to the database.
@@ -279,6 +274,15 @@ func (tp *TokenPersistent) SaveTokenUsage(ctx context.Context, cursorID string, 
 		return false, err
 	}
 	return true, nil
+}
+
+func (tp *TokenPersistent) GetTokenByTokenId(ctx context.Context, tokenId string) (*models.Cursor, error) {
+	var cursor models.Cursor
+	if err := tp.db.WithContext(ctx).Where("cursor_id = ?", tokenId).First(&cursor).Error; err != nil {
+		logrus.Warnf("Cursor not found for token: %s", tokenId[:10])
+		return nil, err
+	}
+	return &cursor, nil
 }
 
 // TokenUnavailableReason mirrors the Python enum-like structure.

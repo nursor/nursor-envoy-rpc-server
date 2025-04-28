@@ -21,6 +21,7 @@ type UserService struct {
 	defaultRedis      *redis.Client
 	db                *gorm.DB
 	dispatcherService DispatchService
+	redisDispatcher   *helper.RedisOperator
 	userCachePrefix   string
 	userCachePrefixID string
 	initialized       bool
@@ -57,6 +58,7 @@ func (us *UserService) initialize(db *gorm.DB, redisClient *redis.Client) {
 	us.dispatcherService = *GetDispatchInstance()
 	us.userCachePrefix = "user_cache:token"
 	us.userCachePrefixID = "user_cache:id"
+	us.redisDispatcher = helper.GetInstanceRedisOperator()
 	us.initialized = true
 }
 
@@ -227,6 +229,11 @@ func (us *UserService) IsUserAvailable(ctx context.Context, innerToken string) (
 	}
 
 	return true, nil
+}
+
+func (us *UserService) HandleUserLeave(ctx context.Context, userId string) error {
+	_, err := us.redisDispatcher.DeleteToken(ctx, userId)
+	return err
 }
 
 // ResetInstance resets the singleton instance (mainly for testing).
