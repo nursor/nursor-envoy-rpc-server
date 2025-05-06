@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -30,15 +31,30 @@ type extProcServer struct {
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
 	var httpRecrod = nursor.NewRequestRecord()
 	var isChatRequest = false
+	var isChatHasException = false
 	timeA := time.Now()
 	defer func() {
-		log.Printf("Stream closed after %s", time.Since(timeA))
-		if httpRecrod != nil {
-			go provider.PushHttpRequestToDB(httpRecrod)
-		}
-		if isChatRequest {
-			// go service.GetTokenServiceInstance().IncrementTokenUsage(stream.Context(), httpRecrod.InnerTokenId)
-		}
+		// 异步处理
+		go func() {
+			log.Printf("Stream closed after %s", time.Since(timeA))
+			if httpRecrod != nil {
+				provider.PushHttpRequestToDB(httpRecrod)
+			}
+			if isChatRequest {
+				if !isChatHasException {
+					dispatcherService := service.GetDispatchInstance()
+					dispatcherService.IncrTokenUsage(context.Background(), httpRecrod.InnerTokenId)
+				} else {
+					dispatcherService := service.GetDispatchInstance()
+					tokenID, err := dispatcherService.GetTokenIdByInnerToken(context.Background(), httpRecrod.InnerTokenId)
+					if err != nil {
+						log.Printf("Error getting token ID: %v", err)
+					}
+					dispatcherService.HandleTokenExpired(context.Background(), tokenID)
+				}
+
+			}
+		}()
 	}()
 
 	var cursorAccount *models.Cursor
@@ -96,7 +112,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						httpRecrod.InnerTokenId = userInfo.InnerToken
 					}
 					dispatcherService := service.GetDispatchInstance()
-					cursorAccount, err = dispatcherService.DispatchTokenForUser(ctx, fmt.Sprint(userInfo.ID))
+					cursorAccount, err = dispatcherService.DispatchTokenForUser(ctx, userInfo)
 					if err != nil || cursorAccount == nil {
 						log.Printf("Error dispatching token: %v", err)
 						resp := utils.GetResponseForErr(err)
@@ -131,11 +147,6 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					// 用于 URL 拼接，单独处理
 					continue
 				}
-			}
-
-			if isChatRequest {
-				dispatcherService := service.GetDispatchInstance()
-				dispatcherService.IncrTokenUsage(ctx, *cursorAccount.CursorID)
 			}
 
 			if !isAuthHeaderExisted {
@@ -214,10 +225,23 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			log.Println("Received response body")
 			body := r.ResponseBody.GetBody()
 			httpRecrod.AddResponseBody(body)
+			var bodyMutation *extprocv3.BodyMutation
+			// TODO: 需要优化
+			if strings.Contains(string(body), "resource_exhausted") {
+				fmt.Println("resource_exhausted")
+				isChatHasException = true
+				bodyMutation = &extprocv3.BodyMutation{
+					Mutation: &extprocv3.BodyMutation_Body{
+						Body: []byte(`1`),
+					},
+				}
+			}
 			resp := &extprocv3.ProcessingResponse{
 				Response: &extprocv3.ProcessingResponse_ResponseBody{
 					ResponseBody: &extprocv3.BodyResponse{
-						Response: &extprocv3.CommonResponse{},
+						Response: &extprocv3.CommonResponse{
+							BodyMutation: bodyMutation,
+						},
 					},
 				},
 			}

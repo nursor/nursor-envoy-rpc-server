@@ -114,23 +114,47 @@ func (ro *RedisOperator) BindUserAndToken(ctx context.Context, userID, tokenID s
 	return ro.BindingUserAndToken(ctx, userID, tokenID)
 }
 
-// DeleteToken removes a user's token binding.
-func (ro *RedisOperator) DeleteToken(ctx context.Context, userID string) (int64, error) {
-	token, err := ro.GetTokenIdByUserId(ctx, userID)
+func (ro *RedisOperator) SetUserUsage(ctx context.Context, userID string, usage int64) error {
+	userUsageKey := ro.userUsagePrefix + userID
+	return ro.redis.Set(ctx, userUsageKey, usage, 0).Err()
+}
+
+func (ro *RedisOperator) RemoveCacheUserId(ctx context.Context, userId string) (int64, error) {
+	// 移除用户和token的绑定
+	userKey := ro.userTokenPrefix + userId
+	if err := ro.redis.Del(ctx, userKey).Err(); err != nil {
+		return 0, err
+	}
+	// 移除用户使用记录
+	userUsageKey := ro.userUsagePrefix + userId
+	userUsage, err := ro.redis.GetDel(ctx, userUsageKey).Result()
+	if err == nil {
+		userUsageInt, err := strconv.ParseInt(userUsage, 10, 64)
+		if err == nil && userUsageInt > 0 {
+			return userUsageInt, nil
+		}
+	}
+	return 0, nil
+}
+
+func (ro *RedisOperator) RemoveCachedToken(ctx context.Context, tokenID string) error {
+	// 移除token使用记录
+	tokenUsageKey := ro.tokenUsagePrefix + tokenID
+	ro.redis.Del(ctx, tokenUsageKey)
+	// 移除token的可用条件
+	ro.redis.SRem(ctx, ro.tokenListKey, tokenID)
+	// 移除token的绑定用户
+	ro.redis.Del(ctx, ro.tokenUsersPrefix+tokenID)
+	return nil
+}
+
+func (ro *RedisOperator) GetUserIdByToken(ctx context.Context, tokenID string) ([]string, error) {
+	tokenUsersKey := ro.tokenUsersPrefix + tokenID
+	userIds, err := ro.redis.SMembers(ctx, tokenUsersKey).Result()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if token == "" {
-		return 0, nil
-	}
-
-	tokenUsersKey := ro.tokenUsersPrefix + token
-	if err := ro.redis.SRem(ctx, tokenUsersKey, userID).Err(); err != nil {
-		return 0, err
-	}
-
-	userKey := ro.userTokenPrefix + userID
-	return ro.redis.Del(ctx, userKey).Result()
+	return userIds, nil
 }
 
 // IsTokenUnused checks if a token is unused.
@@ -169,12 +193,6 @@ func (ro *RedisOperator) GetMinBindingToken(ctx context.Context) (string, error)
 
 	return selectedToken, nil
 
-}
-
-// HandleUserLeave cleans up records when a user leaves.
-func (ro *RedisOperator) HandleUserLeave(ctx context.Context, userID string) error {
-	_, err := ro.DeleteToken(ctx, userID)
-	return err
 }
 
 func (ro *RedisOperator) GetAvailableTokens(ctx context.Context) ([]string, error) {
@@ -216,18 +234,35 @@ func (ro *RedisOperator) AssignNewToken(ctx context.Context) (string, error) {
 	return selectedToken, nil
 }
 
+func (ro *RedisOperator) InitTokenUsage(ctx context.Context, tokenID string) (string, error) {
+	tokenUsageKey := ro.tokenUsagePrefix + tokenID
+	_, err := ro.redis.Get(ctx, tokenUsageKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			if err := ro.redis.Set(ctx, tokenUsageKey, 0, 0).Err(); err != nil {
+				return "", err
+			}
+		} else {
+			return "", err
+		}
+	}
+	return tokenID, nil
+}
+
 // IncrementTokenUsage increments token and user usage counts.
 func (ro *RedisOperator) IncrementTokenUsage(ctx context.Context, tokenID string, count int64) (bool, error) {
 	tokenUsageKey := ro.tokenUsagePrefix + tokenID
 	if err := ro.redis.IncrBy(ctx, tokenUsageKey, count).Err(); err != nil {
 		return false, err
 	}
+	return true, nil
+}
 
-	userUsageKey := ro.userUsagePrefix + tokenID
+func (ro *RedisOperator) IncrementUserUsage(ctx context.Context, userID string, count int64) (bool, error) {
+	userUsageKey := ro.userUsagePrefix + userID
 	if err := ro.redis.IncrBy(ctx, userUsageKey, count).Err(); err != nil {
 		return false, err
 	}
-
 	return true, nil
 }
 

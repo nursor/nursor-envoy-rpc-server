@@ -61,6 +61,20 @@ func (tp *TokenPersistent) GetAvailableTokenIdFromDB(ctx context.Context, count 
 		logrus.Errorf("Error retrieving available token: %v", err)
 		return nil, err
 	}
+	if len(cursors) > 0 {
+		var cursorIDs []string
+		for _, cursor := range cursors {
+			cursorIDs = append(cursorIDs, *cursor.CursorID) // Assuming Cursor model has an ID field
+		}
+		err = tp.db.WithContext(ctx).
+			Model(&models.Cursor{}).
+			Where("cursor_id IN ?", cursorIDs).
+			Update("status", "dispatched").Error
+		if err != nil {
+			logrus.Errorf("Error updating cursor status to dispatched: %v", err)
+			return nil, err
+		}
+	}
 
 	return cursors, nil
 }

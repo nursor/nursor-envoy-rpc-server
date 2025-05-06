@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"nursor-envoy-rpc/helper"
@@ -20,7 +19,6 @@ import (
 type UserService struct {
 	defaultRedis      *redis.Client
 	db                *gorm.DB
-	dispatcherService DispatchService
 	redisDispatcher   *helper.RedisOperator
 	userCachePrefix   string
 	userCachePrefixID string
@@ -55,7 +53,7 @@ func (us *UserService) initialize(db *gorm.DB, redisClient *redis.Client) {
 	}
 	us.defaultRedis = redisClient
 	us.db = db
-	us.dispatcherService = *GetDispatchInstance()
+
 	us.userCachePrefix = "user_cache:token"
 	us.userCachePrefixID = "user_cache:id"
 	us.redisDispatcher = helper.GetInstanceRedisOperator()
@@ -96,48 +94,6 @@ func (us *UserService) CheckAndGetUserFromInnerToken(ctx context.Context, authro
 	return userInfo, nil
 }
 
-// GetUserMapByToken retrieves user information by access token, using Redis cache.
-func (us *UserService) GetUserMapByToken(ctx context.Context, userToken string) (map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("%s:%s", us.userCachePrefix, userToken)
-	userInfoJSON, err := us.defaultRedis.Get(ctx, cacheKey).Result()
-	if err == nil && userInfoJSON != "" {
-		var userInfo map[string]interface{}
-		if err := json.Unmarshal([]byte(userInfoJSON), &userInfo); err != nil {
-			logrus.Errorf("Error unmarshaling cached user info: %v", err)
-			return nil, err
-		}
-		return userInfo, nil
-	}
-	if err != redis.Nil {
-		logrus.Errorf("Error accessing Redis: %v", err)
-	}
-
-	user, err := us.GetUserByInnerTokenFromDB(ctx, userToken)
-	if err != nil {
-		return nil, err
-	}
-	userInfo := map[string]interface{}{
-		"id":           user.ID,
-		"access_token": user.AccessToken,
-		"inner_token":  user.InnerToken,
-		"usage":        user.Usage,
-		"limit":        user.Limit,
-		"expired_at":   user.ExpiredAt,
-	}
-	userInfoJSONBytes, err := json.Marshal(userInfo)
-	if err != nil {
-		logrus.Errorf("Error marshaling user info: %v", err)
-		return userInfo, nil // Return user info anyway
-	}
-
-	err = us.defaultRedis.Set(ctx, cacheKey, string(userInfoJSONBytes), 30*time.Minute).Err()
-	if err != nil {
-		logrus.Errorf("Error caching user info: %v", err)
-	}
-
-	return userInfo, nil
-}
-
 func (us *UserService) GetUserByInnerTokenFromDB(ctx context.Context, innerToken string) (*models.User, error) {
 	var user models.User
 	err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
@@ -157,23 +113,10 @@ func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken strin
 }
 
 // GetUserByID retrieves user information by user ID, using Redis cache.
-func (us *UserService) GetUserByID(ctx context.Context, userID int) (map[string]interface{}, error) {
-	cacheKey := fmt.Sprintf("%s:%d", us.userCachePrefixID, userID)
-	userInfoJSON, err := us.defaultRedis.Get(ctx, cacheKey).Result()
-	if err == nil && userInfoJSON != "" {
-		var userInfo map[string]interface{}
-		if err := json.Unmarshal([]byte(userInfoJSON), &userInfo); err != nil {
-			logrus.Errorf("Error unmarshaling cached user info: %v", err)
-			return nil, err
-		}
-		return userInfo, nil
-	}
-	if err != redis.Nil {
-		logrus.Errorf("Error accessing Redis: %v", err)
-	}
+func (us *UserService) GetUserByID(ctx context.Context, userID int) (*models.User, error) {
 
 	var user models.User
-	err = us.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error
+	err := us.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}
@@ -182,26 +125,7 @@ func (us *UserService) GetUserByID(ctx context.Context, userID int) (map[string]
 		return nil, err
 	}
 
-	userInfo := map[string]interface{}{
-		"id":           user.ID,
-		"access_token": user.AccessToken,
-		"inner_token":  user.InnerToken,
-		"usage":        user.Usage,
-		"limit":        user.Limit,
-		"expired_at":   user.ExpiredAt,
-	}
-	userInfoJSONBytes, err := json.Marshal(userInfo)
-	if err != nil {
-		logrus.Errorf("Error marshaling user info: %v", err)
-		return userInfo, nil // Return user info anyway
-	}
-
-	err = us.defaultRedis.Set(ctx, cacheKey, string(userInfoJSONBytes), 30*time.Minute).Err()
-	if err != nil {
-		logrus.Errorf("Error caching user info: %v", err)
-	}
-
-	return userInfo, nil
+	return &user, nil
 }
 
 // IsUserAvailable checks if a user is available based on their inner token.
@@ -227,13 +151,42 @@ func (us *UserService) IsUserAvailable(ctx context.Context, innerToken string) (
 	if expiredAt.Before(time.Now().UTC()) {
 		return false, nil
 	}
-
 	return true, nil
 }
 
-func (us *UserService) HandleUserLeave(ctx context.Context, userId string) error {
-	_, err := us.redisDispatcher.DeleteToken(ctx, userId)
-	return err
+func (us *UserService) IncrementTokenUsage(ctx context.Context, innerToken string) error {
+	user, err := us.GetUserByInnerToken(ctx, innerToken)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return errors.New("user not found")
+	}
+	user.Usage++
+	err = us.db.WithContext(ctx).Save(&user).Error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (us *UserService) CompareAndSaveTokenUsage(ctx context.Context, userID int, usage int) error {
+	user, err := us.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return errors.New("user not found")
+	}
+	if user.Usage > usage {
+		return nil
+	}
+	user.Usage = usage
+	err = us.db.WithContext(ctx).Save(&user).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // ResetInstance resets the singleton instance (mainly for testing).

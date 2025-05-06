@@ -4,6 +4,7 @@ import (
 	"context"
 	"nursor-envoy-rpc/helper"
 	"nursor-envoy-rpc/models"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 type DispatchService struct {
 	redisDispatcher *helper.RedisOperator
 	tokenPersistent *helper.TokenPersistent
+	userService     *UserService
 	redis           *redis.Client
 	initialized     bool
 }
@@ -40,6 +42,7 @@ func (ds *DispatchService) initialize() {
 	ds.redis = helper.GetNewRedis() // Assume this function exists
 	ds.redisDispatcher = helper.GetInstanceRedisOperator()
 	ds.tokenPersistent = helper.GetTPInstance()
+	ds.userService = GetUserServiceInstance()
 	ds.initialized = true
 }
 
@@ -63,28 +66,36 @@ func (ds *DispatchService) AssignNewTokenForUser(ctx context.Context) (string, e
 }
 
 // HandleNewUser processes a new user and assigns a token if needed.
-func (ds *DispatchService) DispatchTokenForNewUser(ctx context.Context, userID string) (string, error) {
+func (ds *DispatchService) DispatchTokenForNewUser(ctx context.Context, user *models.User) (string, error) {
 	newTokenID, err := ds.redisDispatcher.AssignNewToken(ctx)
 	if err != nil || newTokenID == "" {
-		logrus.Errorf("Failed to assign token to user %s: %v", userID, err)
+		logrus.Errorf("Failed to assign token to user %d: %v", user.ID, err)
 		return "", err
 	}
 
-	if err := ds.redisDispatcher.BindUserAndToken(ctx, userID, newTokenID); err != nil {
+	if err := ds.redisDispatcher.BindUserAndToken(ctx, strconv.Itoa(user.ID), newTokenID); err != nil {
 		return "", err
 	}
+	if _, err := ds.redisDispatcher.InitTokenUsage(ctx, newTokenID); err != nil {
+		return "", err
+	}
+	if err := ds.redisDispatcher.SetUserUsage(ctx, strconv.Itoa(user.ID), int64(user.Usage)); err != nil {
+		return "", err
+	}
+
 	return newTokenID, nil
 }
 
 // DispatchTokenForUser assigns a token to a new user.
-func (ds *DispatchService) DispatchTokenForUser(ctx context.Context, userID string) (*models.Cursor, error) {
+func (ds *DispatchService) DispatchTokenForUser(ctx context.Context, user *models.User) (*models.Cursor, error) {
+	userID := strconv.Itoa(user.ID)
 	tokenID, err := ds.redisDispatcher.GetTokenIdByUserId(ctx, userID)
 	if err != nil {
 		logrus.Errorf("Error retrieving token for user %s: %v", userID, err)
 		return nil, err
 	}
 	if tokenID == "" {
-		tokenID, err = ds.DispatchTokenForNewUser(ctx, userID)
+		tokenID, err = ds.DispatchTokenForNewUser(ctx, user)
 		if err != nil {
 			logrus.Errorf("Error handling new user %s: %v", userID, err)
 			return nil, err
@@ -103,9 +114,74 @@ func (ds *DispatchService) DispatchTokenForUser(ctx context.Context, userID stri
 	return token, nil
 }
 
-func (ds *DispatchService) IncrTokenUsage(ctx context.Context, tokenID string) error {
-	_, err := ds.redisDispatcher.IncrementTokenUsage(ctx, tokenID, 1)
-	return err
+func (ds *DispatchService) IncrTokenUsage(ctx context.Context, innerToken string) error {
+	// 获取用户信息
+	user, err := ds.userService.GetUserByInnerToken(ctx, innerToken)
+	if err != nil {
+		return err
+	}
+	// 获取tokenID
+	tokenID, err := ds.redisDispatcher.GetTokenIdByUserId(ctx, strconv.Itoa(user.ID))
+	if err != nil {
+		return err
+	}
+	// 增加token使用次数
+	_, err = ds.redisDispatcher.IncrementTokenUsage(ctx, tokenID, 1)
+	if err != nil {
+		return err
+	}
+	// 增加用户使用次数
+	_, err = ds.redisDispatcher.IncrementUserUsage(ctx, strconv.Itoa(user.ID), 1)
+	if err != nil {
+		return err
+	}
+	// 保存用户使用次数
+	go func() {
+		user.Usage++
+		ds.userService.db.WithContext(ctx).Save(&user)
+	}()
+	logrus.Infof("IncrTokenUsage: user %d, tokenID %s, usage %d", user.ID, tokenID, user.Usage)
+	return nil
+}
+
+func (ds *DispatchService) HandleTokenExpired(ctx context.Context, tokenID string) error {
+	userIds, err := ds.redisDispatcher.GetUserIdByToken(ctx, tokenID)
+	if err != nil {
+		return err
+	}
+	for _, userId := range userIds {
+		removedUsage, err := ds.redisDispatcher.RemoveCacheUserId(ctx, userId)
+		if err != nil {
+			continue
+		}
+		userIdInt, err := strconv.Atoi(userId)
+		if err != nil {
+			continue
+		}
+		user, err := ds.userService.GetUserByID(ctx, userIdInt)
+		if err != nil {
+			continue
+		}
+		if removedUsage > 0 {
+			ds.userService.CompareAndSaveTokenUsage(ctx, userIdInt, int(removedUsage))
+			ds.DispatchTokenForNewUser(ctx, user)
+		}
+	}
+	ds.redisDispatcher.RemoveCachedToken(ctx, tokenID)
+	return nil
+}
+
+func (ds *DispatchService) GetTokenIdByInnerToken(ctx context.Context, innerToken string) (string, error) {
+	user, err := ds.userService.GetUserByInnerToken(ctx, innerToken)
+	if err != nil {
+		return "", err
+	}
+	// 获取tokenID
+	tokenID, err := ds.redisDispatcher.GetTokenIdByUserId(ctx, strconv.Itoa(user.ID))
+	if err != nil {
+		return "", err
+	}
+	return tokenID, nil
 }
 
 // ResetInstance resets the singleton instance (mainly for testing).
@@ -121,22 +197,22 @@ func KeepTokenQueueAvailable(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	for _, token := range allTokens {
-		tokenUsage, err := ds.redisDispatcher.GetTokenUsage(ctx, token)
+	for _, tokenID := range allTokens {
+		tokenUsage, err := ds.redisDispatcher.GetTokenUsage(ctx, tokenID)
 		if err != nil {
 			return
 		}
-		if tokenUsage > 150 {
-			ds.redisDispatcher.DeleteToken(ctx, token)
+		if tokenUsage > 40 {
+			ds.HandleTokenExpired(ctx, tokenID)
 		}
 	}
-	loopCnt := 10 - len(allTokens)
+	tokenKeepSizeDiff := 10 - len(allTokens)
 
-	tokenId, err := ds.tokenPersistent.GetAvailableTokenIdFromDB(ctx, loopCnt)
+	tokenIds, err := ds.tokenPersistent.GetAvailableTokenIdFromDB(ctx, tokenKeepSizeDiff)
 	if err != nil {
 		return
 	}
-	for _, token := range tokenId {
+	for _, token := range tokenIds {
 		ds.redisDispatcher.AddAvailableToken(ctx, *token.CursorID)
 	}
 }
@@ -144,7 +220,7 @@ func KeepTokenQueueAvailable(ctx context.Context) {
 func init() {
 	go func() {
 		for {
-			KeepTokenQueueAvailable(context.Background())
+			KeepTokenQueueAvailable(context.TODO())
 			time.Sleep(10 * time.Second)
 		}
 	}()
