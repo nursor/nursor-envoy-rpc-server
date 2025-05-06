@@ -106,13 +106,33 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						}
 						return err
 					}
-					log.Printf("Token valid: %s\n", orgAuth)
+					originTokenSplited := strings.Split(orgAuth, ".")
+					newTokenSplited := strings.Split(*cursorAccount.AccessToken, ".")
+					log.Printf("Token inner and outside: %s,<------------->%s\n", originTokenSplited[len(originTokenSplited)-1], newTokenSplited[len(newTokenSplited)-1])
 				}
 				// 聊天请求单独处理
 				if strings.Contains(string(h.RawValue), "StreamUnifiedChatWithTools") {
 					isChatRequest = true
 				}
+
+				switch h.Key {
+				case ":method":
+					httpRecrod.Method = string(h.RawValue) // e.g., "POST"
+				case ":authority":
+					httpRecrod.Host = string(h.RawValue) // e.g., "cursor.sh"
+				case ":path":
+					// :path 包含路径和查询参数，需拼接 scheme 和 host 构成完整 URL
+					scheme := httpRecrod.RequestHeaders[":scheme"] // e.g., "http" or "https"
+					if scheme == "" {
+						scheme = "http" // 默认值
+					}
+					httpRecrod.Url = scheme + "://" + httpRecrod.Host + string(h.RawValue) // e.g., "http://cursor.sh/path?query"
+				case ":scheme":
+					// 用于 URL 拼接，单独处理
+					continue
+				}
 			}
+
 			if isChatRequest {
 				dispatcherService := service.GetDispatchInstance()
 				dispatcherService.IncrTokenUsage(ctx, *cursorAccount.CursorID)
@@ -152,11 +172,18 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				}
 				log.Println("Authorization header replaced")
 			}
+
 		case *extprocv3.ProcessingRequest_RequestBody:
 			log.Println("Received request body")
 			body := r.RequestBody.GetBody()
 			httpRecrod.AddRequestBody(body)
-			resp := &extprocv3.ProcessingResponse{}
+			resp := &extprocv3.ProcessingResponse{
+				Response: &extprocv3.ProcessingResponse_RequestBody{
+					RequestBody: &extprocv3.BodyResponse{
+						Response: &extprocv3.CommonResponse{},
+					},
+				},
+			}
 			if err := stream.Send(resp); err != nil {
 				log.Printf("Error sending response: %v", err)
 				return err
@@ -187,7 +214,13 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			log.Println("Received response body")
 			body := r.ResponseBody.GetBody()
 			httpRecrod.AddResponseBody(body)
-			resp := &extprocv3.ProcessingResponse{}
+			resp := &extprocv3.ProcessingResponse{
+				Response: &extprocv3.ProcessingResponse_ResponseBody{
+					ResponseBody: &extprocv3.BodyResponse{
+						Response: &extprocv3.CommonResponse{},
+					},
+				},
+			}
 			if err := stream.Send(resp); err != nil {
 				log.Printf("Error sending response: %v", err)
 				return err

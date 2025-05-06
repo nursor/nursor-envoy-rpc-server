@@ -1,28 +1,17 @@
 package nursor
 
 import (
-	"net/url"
+	"encoding/base64"
+	"strings"
 	"time"
 )
-
-// type HttpRecordToInsert struct {
-// 	RequestHeaders  map[string]string `json:"request_headers"`
-// 	RequestBody     string            `json:"request_body"`
-// 	ResponseHeaders map[string]string `json:"response_headers"`
-// 	ResponseBody    string            `json:"response_body"`
-// 	Url             string            `json:"url"`
-// 	Method          string            `json:"method"`
-// 	Host            string            `json:"host"`
-// 	Datetime        string            `json:"datetime"`
-// 	HttpVersion     string            `json:"http_version"`
-// }
 
 type HttpRecord struct {
 	RequestHeaders  map[string]string `json:"request_headers"`
 	RequestBody     []byte            `json:"request_body"`
 	ResponseHeaders map[string]string `json:"response_headers"`
 	ResponseBody    []byte            `json:"response_body"`
-	Url             *url.URL          `json:"url"`
+	Url             string            `json:"url"`
 	Method          string            `json:"method"`
 	Host            string            `json:"host"`
 	Datetime        string            `json:"datetime"`
@@ -36,7 +25,7 @@ func NewRequestRecord() *HttpRecord {
 		RequestBody:     []byte{},
 		ResponseHeaders: map[string]string{},
 		ResponseBody:    []byte{},
-		Url:             &url.URL{},
+		Url:             "",
 		Method:          "Post",
 		Host:            "cursor.sh",
 		Datetime:        time.Now().Format("2006-01-02 15:04:05"),
@@ -68,16 +57,36 @@ func (r *HttpRecord) AddResponseBody(body []byte) {
 	r.ResponseBody = append(r.ResponseBody, body...)
 }
 
-// func (r *HttpRecord) ToInsertModel() *HttpRecordToInsert {
-// 	return &HttpRecordToInsert{
-// 		RequestHeaders:  r.RequestHeaders,
-// 		RequestBody:     string(r.RequestBody),
-// 		ResponseHeaders: r.ResponseHeaders,
-// 		ResponseBody:    string(r.ResponseBody),
-// 		Url:             r.Url.String(),
-// 		Method:          r.Method,
-// 		Host:            r.Host,
-// 		Datetime:        r.Datetime,
-// 		HttpVersion:     r.HttpVersion,
-// 	}
-// }
+func (r *HttpRecord) Base64RequestBody() string {
+	if r.RequestBody == nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(r.RequestBody)
+}
+
+func (r *HttpRecord) Base64ResponseBody() string {
+	if r.ResponseBody == nil {
+		return ""
+	}
+
+	// 将 ResponseBody 转换为字符串
+	bodyStr := string(r.ResponseBody)
+
+	// 检查是否为有效的 Base64 编码
+	// 1. 去除首尾空格
+	// 2. 检查长度是否为 4 的倍数（Base64 编码长度通常是 4 的倍数）
+	// 3. 尝试解码，检查是否有错误
+	trimmedBody := strings.TrimSpace(bodyStr)
+	if len(trimmedBody)%4 == 0 {
+		// 尝试解码
+		_, err := base64.StdEncoding.DecodeString(trimmedBody)
+		if err == nil {
+			// 如果解码成功，返回解码后的字符串
+			decoded, _ := base64.StdEncoding.DecodeString(trimmedBody)
+			return string(decoded)
+		}
+	}
+
+	// 如果不是 Base64 编码或解码失败，原样返回
+	return bodyStr
+}

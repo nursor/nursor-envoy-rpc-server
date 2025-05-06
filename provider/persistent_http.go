@@ -16,6 +16,7 @@ var kafkaWriter *kafka.Writer
 func PushHttpRequestToDB(req *httpRecord.HttpRecord) error {
 
 	writer := GetKafkaWriter()
+
 	recordJson, err := json.Marshal(req)
 	if err != nil {
 		return err
