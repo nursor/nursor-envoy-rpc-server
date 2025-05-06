@@ -2,7 +2,9 @@ package helper
 
 import (
 	"context"
+	"fmt"
 	"nursor-envoy-rpc/models"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -308,7 +310,27 @@ type TokenUnavailableReason struct {
 // GetNewDB is a placeholder for getting a new GORM DB connection.
 func GetNewDB() *gorm.DB {
 	// Implement GORM DB initialization (e.g., using models.InitDB)
-	dsn := "root:asd123456@tcp(172.16.238.2:30409)/nursor-test?charset=utf8mb4&parseTime=True&loc=Local"
+	MYSQL_HOST := os.Getenv("MYSQL_HOST")
+	MYSQL_PORT := os.Getenv("MYSQL_PORT")
+	MYSQL_USER := os.Getenv("MYSQL_USER")
+	MYSQL_PASSWORD := os.Getenv("MYSQL_PASSWORD")
+	MYSQL_DATABASE := os.Getenv("MYSQL_DATABASE")
+	if MYSQL_HOST == "" {
+		MYSQL_HOST = "172.16.238.2"
+	}
+	if MYSQL_PORT == "" {
+		MYSQL_PORT = "30409"
+	}
+	if MYSQL_USER == "" {
+		MYSQL_USER = "root"
+	}
+	if MYSQL_PASSWORD == "" {
+		MYSQL_PASSWORD = "asd123456"
+	}
+	if MYSQL_DATABASE == "" {
+		MYSQL_DATABASE = "nursor-test"
+	}
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", MYSQL_USER, MYSQL_PASSWORD, MYSQL_HOST, MYSQL_PORT, MYSQL_DATABASE)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		logrus.Fatalf("Failed to initialize database: %v", err)
