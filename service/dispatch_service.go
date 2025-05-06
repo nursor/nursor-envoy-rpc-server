@@ -163,7 +163,7 @@ func (ds *DispatchService) HandleTokenExpired(ctx context.Context, tokenID strin
 			continue
 		}
 		if removedUsage > 0 {
-			ds.userService.CompareAndSaveTokenUsage(ctx, userIdInt, int(removedUsage))
+			ds.userService.CompareAndSaveTokenUsage(ctx, user, int(removedUsage))
 			ds.DispatchTokenForNewUser(ctx, user)
 		}
 	}

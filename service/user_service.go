@@ -170,11 +170,7 @@ func (us *UserService) IncrementTokenUsage(ctx context.Context, innerToken strin
 	return nil
 }
 
-func (us *UserService) CompareAndSaveTokenUsage(ctx context.Context, userID int, usage int) error {
-	user, err := us.GetUserByID(ctx, userID)
-	if err != nil {
-		return err
-	}
+func (us *UserService) CompareAndSaveTokenUsage(ctx context.Context, user *models.User, usage int) error {
 	if user == nil {
 		return errors.New("user not found")
 	}
@@ -182,7 +178,7 @@ func (us *UserService) CompareAndSaveTokenUsage(ctx context.Context, userID int,
 		return nil
 	}
 	user.Usage = usage
-	err = us.db.WithContext(ctx).Save(&user).Error
+	err := us.db.WithContext(ctx).Save(&user).Error
 	if err != nil {
 		return err
 	}
