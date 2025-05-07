@@ -4,6 +4,7 @@ import (
 	"context"
 	"nursor-envoy-rpc/helper"
 	"nursor-envoy-rpc/models"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -193,6 +194,14 @@ func ResetDispatchServiceInstance() {
 
 func KeepTokenQueueAvailable(ctx context.Context) {
 	ds := GetDispatchInstance()
+	tokenKeepSize := os.Getenv("TOKEN_KEEP_SIZE")
+	if tokenKeepSize == "" {
+		tokenKeepSize = "10"
+	}
+	tokenKeepSizeInt, err := strconv.Atoi(tokenKeepSize)
+	if err != nil {
+		return
+	}
 	allTokens, err := ds.redisDispatcher.GetAvailableTokens(ctx)
 	if err != nil {
 		return
@@ -206,7 +215,7 @@ func KeepTokenQueueAvailable(ctx context.Context) {
 			ds.HandleTokenExpired(ctx, tokenID)
 		}
 	}
-	tokenKeepSizeDiff := 10 - len(allTokens)
+	tokenKeepSizeDiff := tokenKeepSizeInt - len(allTokens)
 
 	tokenIds, err := ds.tokenPersistent.GetAvailableTokenIdFromDB(ctx, tokenKeepSizeDiff)
 	if err != nil {

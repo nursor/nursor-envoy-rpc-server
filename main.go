@@ -11,6 +11,7 @@ import (
 	"nursor-envoy-rpc/provider"
 	"nursor-envoy-rpc/service"
 	"nursor-envoy-rpc/utils"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+	tv3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 )
 
 type extProcServer struct {
@@ -204,18 +206,42 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			headers := r.ResponseHeaders.GetHeaders()
 			for _, h := range headers.Headers {
 				httpRecrod.AddResponseHeader(h.Key, string(h.RawValue))
+				if strings.ToLower(h.Key) == ":status" {
+					respStatus := string(h.RawValue)
+					respStatusInt, err := strconv.Atoi(respStatus)
+					if err != nil {
+						log.Printf("Error converting response status to int: %v", err)
+					}
+					if respStatusInt >= 400 {
+						isChatHasException = true
+					}
+				}
 			}
-			resp := &extprocv3.ProcessingResponse{
-				Response: &extprocv3.ProcessingResponse_ResponseHeaders{
-					ResponseHeaders: &extprocv3.HeadersResponse{
-						Response: &extprocv3.CommonResponse{
-							HeaderMutation: &extprocv3.HeaderMutation{
-								RemoveHeaders: []string{"authorization"},
-								SetHeaders:    []*corev3.HeaderValueOption{},
+			var resp *extprocv3.ProcessingResponse
+			if !isChatHasException {
+				resp = &extprocv3.ProcessingResponse{
+					Response: &extprocv3.ProcessingResponse_ResponseHeaders{
+						ResponseHeaders: &extprocv3.HeadersResponse{
+							Response: &extprocv3.CommonResponse{
+								HeaderMutation: &extprocv3.HeaderMutation{
+									RemoveHeaders: []string{"authorization"},
+									SetHeaders:    []*corev3.HeaderValueOption{},
+								},
 							},
 						},
 					},
-				},
+				}
+
+			} else {
+				resp = &extprocv3.ProcessingResponse{
+					Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+						ImmediateResponse: &extprocv3.ImmediateResponse{
+							Status: &tv3.HttpStatus{
+								Code: 567,
+							},
+						},
+					},
+				}
 			}
 			if err := stream.Send(resp); err != nil {
 				log.Printf("Error sending response: %v", err)
@@ -227,9 +253,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			httpRecrod.AddResponseBody(body)
 			var bodyMutation *extprocv3.BodyMutation
 			// TODO: 需要优化
-			if strings.Contains(string(body), "resource_exhausted") {
+			if strings.Contains(string(body), "resource_exhausted") || isChatHasException {
 				fmt.Println("resource_exhausted")
-				isChatHasException = true
 				bodyMutation = &extprocv3.BodyMutation{
 					Mutation: &extprocv3.BodyMutation_Body{
 						Body: []byte(`1`),
