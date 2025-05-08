@@ -295,7 +295,7 @@ func (tp *TokenPersistent) SaveTokenUsage(ctx context.Context, cursorID string, 
 func (tp *TokenPersistent) GetTokenByTokenId(ctx context.Context, tokenId string) (*models.Cursor, error) {
 	var cursor models.Cursor
 	if err := tp.db.WithContext(ctx).Where("cursor_id = ?", tokenId).First(&cursor).Error; err != nil {
-		logrus.Warnf("Cursor not found for token: %s", tokenId[:10])
+		logrus.Warnf("Cursor not found for token: %s", tokenId)
 		return nil, err
 	}
 	return &cursor, nil
