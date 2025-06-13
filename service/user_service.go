@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/sirupsen/logrus"
+	"github.com/zeromicro/go-zero/core/stores/sqlx"
 	"gorm.io/gorm"
 )
 
@@ -19,6 +20,7 @@ import (
 type UserService struct {
 	defaultRedis      *redis.Client
 	db                *gorm.DB
+	conn              sqlx.SqlConn
 	redisDispatcher   *helper.RedisOperator
 	userCachePrefix   string
 	userCachePrefixID string
@@ -94,6 +96,27 @@ func (us *UserService) CheckAndGetUserFromInnerToken(ctx context.Context, authro
 	return userInfo, nil
 }
 
+// CheckAndGetUserFromInnerToken validates the token in an HTTP flow and sets user info.
+func (us *UserService) CheckAndGetUserFromBindingtoken(ctx context.Context, authrozationValue string) (*models.User, error) {
+	// Check token availability
+	bindShip := models.UserCursorTokenBinding{}
+	user, err := bindShip.FindUserByCursorToken(us.db, authrozationValue)
+	if err != nil {
+		return nil, err
+	}
+
+	isAvailable, err := us.IsUserAvailable(ctx, user.InnerToken)
+	if err != nil {
+		return nil, err
+	}
+	if !isAvailable {
+		logrus.Infof("Invalid or expired token: %s", user.InnerToken)
+		return nil, errors.New("invalid or expired token")
+	}
+
+	return user, nil
+}
+
 func (us *UserService) GetUserByInnerTokenFromDB(ctx context.Context, innerToken string) (*models.User, error) {
 	var user models.User
 	err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
@@ -114,7 +137,6 @@ func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken strin
 
 // GetUserByID retrieves user information by user ID, using Redis cache.
 func (us *UserService) GetUserByID(ctx context.Context, userID int) (*models.User, error) {
-
 	var user models.User
 	err := us.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error
 	if err == gorm.ErrRecordNotFound {

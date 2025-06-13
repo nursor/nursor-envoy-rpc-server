@@ -31,6 +31,7 @@ type Cursor struct {
 	ExpiresAt       *time.Time      `gorm:"column:expires_at"`
 	CreatedAt       time.Time       `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt       time.Time       `gorm:"autoUpdateTime;column:updated_at"`
+	ClientKey       *string         `gorm:"type:varchar(255);column:client_key"`
 }
 
 // TableName specifies the table name for Cursor.

@@ -91,8 +91,10 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					log.Println("Authorization header found and replaced")
 					orgAuth := string(h.RawValue)
 					userService := service.GetUserServiceInstance()
+					// userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
+					// 新版本，使用用户数据库的绑定token
+					userInfo, err := userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
 
-					userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
 					if err != nil {
 						log.Printf("Error parsing token: %v", err)
 						resp := utils.GetResponseForErr(err)
@@ -171,7 +173,14 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 												Key:      "authorization",
 												RawValue: []byte(fmt.Sprintf("Bearer %s", *cursorAccount.AccessToken)),
 											},
+											// TODO： 是不是还需要修改x-cleint-id字段？
 											Append: wrapperspb.Bool(false),
+										},
+										{
+											Header: &corev3.HeaderValue{
+												Key:      "x-client-key",
+												RawValue: []byte(fmt.Sprintf("%s", *cursorAccount.ClientKey)),
+											},
 										},
 									},
 								},
