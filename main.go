@@ -155,7 +155,16 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 
 			if !isAuthHeaderExisted {
 				log.Println("Authorization header not present")
-				resp := &extprocv3.ProcessingResponse{}
+				resp := &extprocv3.ProcessingResponse{
+					Response: &extprocv3.ProcessingResponse_RequestHeaders{
+						RequestHeaders: &extprocv3.HeadersResponse{
+							Response: &extprocv3.CommonResponse{
+								HeaderMutation: &extprocv3.HeaderMutation{},
+							},
+						},
+					},
+				}
+
 				if err := stream.Send(resp); err != nil {
 					log.Printf("Error sending response: %v", err)
 					return err
@@ -176,12 +185,12 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 											// TODO： 是不是还需要修改x-cleint-id字段？
 											Append: wrapperspb.Bool(false),
 										},
-										{
-											Header: &corev3.HeaderValue{
-												Key:      "x-client-key",
-												RawValue: []byte(fmt.Sprintf("%s", *cursorAccount.ClientKey)),
-											},
-										},
+										// {
+										// 	Header: &corev3.HeaderValue{
+										// 		Key:      "x-client-key",
+										// 		RawValue: []byte(fmt.Sprintf("%s", cursorAccount.GetClientKey())),
+										// 	},
+										// },
 									},
 								},
 							},
@@ -232,10 +241,10 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					Response: &extprocv3.ProcessingResponse_ResponseHeaders{
 						ResponseHeaders: &extprocv3.HeadersResponse{
 							Response: &extprocv3.CommonResponse{
-								HeaderMutation: &extprocv3.HeaderMutation{
-									RemoveHeaders: []string{"authorization"},
-									SetHeaders:    []*corev3.HeaderValueOption{},
-								},
+								// HeaderMutation: &extprocv3.HeaderMutation{
+								// 	RemoveHeaders: []string{"authorization"},
+								// 	SetHeaders:    []*corev3.HeaderValueOption{},
+								// },
 							},
 						},
 					},

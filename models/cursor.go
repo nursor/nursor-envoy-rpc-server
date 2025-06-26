@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -32,6 +33,20 @@ type Cursor struct {
 	CreatedAt       time.Time       `gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt       time.Time       `gorm:"autoUpdateTime;column:updated_at"`
 	ClientKey       *string         `gorm:"type:varchar(255);column:client_key"`
+}
+
+// TableName specifies the table name for Cursor.
+func (u *Cursor) GetClientKey() string {
+	if u.ClientKey == nil {
+		uid, err := uuid.NewUUID()
+		if err == nil {
+			key := uid.String()
+			u.ClientKey = &key
+			// db.Save(u)
+			return *u.ClientKey
+		}
+	}
+	return *u.ClientKey
 }
 
 // TableName specifies the table name for Cursor.

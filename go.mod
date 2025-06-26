@@ -5,6 +5,7 @@ go 1.23.4
 require (
 	github.com/envoyproxy/go-control-plane v0.12.0
 	github.com/go-redis/redis/v8 v8.11.5
+	github.com/google/uuid v1.6.0
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/sirupsen/logrus v1.9.3
 	github.com/zeromicro/go-zero v1.8.4

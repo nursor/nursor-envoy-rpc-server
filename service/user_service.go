@@ -99,6 +99,9 @@ func (us *UserService) CheckAndGetUserFromInnerToken(ctx context.Context, authro
 // CheckAndGetUserFromInnerToken validates the token in an HTTP flow and sets user info.
 func (us *UserService) CheckAndGetUserFromBindingtoken(ctx context.Context, authrozationValue string) (*models.User, error) {
 	// Check token availability
+	if strings.Contains(authrozationValue, "Bearer") {
+		authrozationValue = strings.Replace(authrozationValue, "Bearer ", "", -1)
+	}
 	bindShip := models.UserCursorTokenBinding{}
 	user, err := bindShip.FindUserByCursorToken(us.db, authrozationValue)
 	if err != nil {

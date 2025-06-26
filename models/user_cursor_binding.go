@@ -18,7 +18,7 @@ type UserCursorTokenBinding struct {
 
 // TableName 自定义表名
 func (UserCursorTokenBinding) TableName() string {
-	return "user_cursor_token_binding"
+	return "user_usercursortokenbinding"
 }
 
 // FindUserByCursorToken 根据 cursor_token 查找最新的 User 记录
