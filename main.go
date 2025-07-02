@@ -23,7 +23,6 @@ import (
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
-	tv3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 )
 
 type extProcServer struct {
@@ -86,6 +85,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 
 			for _, h := range headers.Headers {
 				httpRecrod.AddRequestHeader(h.Key, string(h.RawValue))
+				if strings.Contains(h.Key, ":authority") {
+					httpRecrod.HttpVersion = "http/2.0"
+				}
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
@@ -150,6 +152,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				case ":scheme":
 					// 用于 URL 拼接，单独处理
 					continue
+				default:
+					httpRecrod.RequestHeaders[h.Key] = string(h.Value)
 				}
 			}
 
@@ -179,8 +183,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 									SetHeaders: []*corev3.HeaderValueOption{
 										{
 											Header: &corev3.HeaderValue{
-												Key:      "authorization",
-												RawValue: []byte(fmt.Sprintf("Bearer %s", *cursorAccount.AccessToken)),
+												Key: "authorization",
+												// RawValue: []byte(fmt.Sprintf("Bearer %s", *cursorAccount.AccessToken)),
+												RawValue: []byte(fmt.Sprintf("Bearer %s", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NTExODg2MDgiLCJyYW5kb21uZXNzIjoiYzRkNDUwZGQtN2VmMC00ZjE5IiwiZXhwIjoxNzU2MzcyNjA4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.mLL8FQe-aAB-I1XzCdjjPaHxjB6MOetIK4CKIACHUN0")),
 											},
 											// TODO： 是不是还需要修改x-cleint-id字段？
 											Append: wrapperspb.Bool(false),
@@ -254,9 +259,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				resp = &extprocv3.ProcessingResponse{
 					Response: &extprocv3.ProcessingResponse_ImmediateResponse{
 						ImmediateResponse: &extprocv3.ImmediateResponse{
-							Status: &tv3.HttpStatus{
-								Code: 567,
-							},
+							// Status: &tv3.HttpStatus{
+							// 	Code: 567,
+							// },
 						},
 					},
 				}

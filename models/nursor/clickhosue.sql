@@ -8,7 +8,8 @@ CREATE TABLE http_record_kafka
     method           String,
     host             String,
     datetime         DateTime,
-    http_version     String
+    http_version     String,
+    status Int
 )
 ENGINE = Kafka
 SETTINGS
