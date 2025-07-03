@@ -87,6 +87,19 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				httpRecrod.AddRequestHeader(h.Key, string(h.RawValue))
 				if strings.Contains(h.Key, ":authority") {
 					httpRecrod.HttpVersion = "http/2.0"
+					if strings.Contains(string(h.RawValue), "metrics.cursor.sh") {
+						resp := &extprocv3.ProcessingResponse{
+							Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+								ImmediateResponse: &extprocv3.ImmediateResponse{},
+							},
+						}
+
+						if err := stream.Send(resp); err != nil {
+							log.Printf("Error sending response: %v", err)
+							return err
+						}
+						return nil
+					}
 				}
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
