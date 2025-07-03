@@ -319,7 +319,7 @@ func GetNewDB() *gorm.DB {
 		MYSQL_HOST = "172.16.238.2"
 	}
 	if MYSQL_PORT == "" {
-		MYSQL_PORT = "30409"
+		MYSQL_PORT = "31494"
 	}
 	if MYSQL_USER == "" {
 		MYSQL_USER = "root"
@@ -328,7 +328,7 @@ func GetNewDB() *gorm.DB {
 		MYSQL_PASSWORD = "asd123456"
 	}
 	if MYSQL_DATABASE == "" {
-		MYSQL_DATABASE = "nursor-test"
+		MYSQL_DATABASE = "nursorv2"
 	}
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", MYSQL_USER, MYSQL_PASSWORD, MYSQL_HOST, MYSQL_PORT, MYSQL_DATABASE)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})

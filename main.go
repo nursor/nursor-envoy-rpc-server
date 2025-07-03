@@ -96,7 +96,6 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					// userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
 					// 新版本，使用用户数据库的绑定token
 					userInfo, err := userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
-
 					if err != nil {
 						log.Printf("Error parsing token: %v", err)
 						resp := utils.GetResponseForErr(err)
@@ -151,9 +150,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					httpRecrod.Url = scheme + "://" + httpRecrod.Host + string(h.RawValue) // e.g., "http://cursor.sh/path?query"
 				case ":scheme":
 					// 用于 URL 拼接，单独处理
-					continue
+					httpRecrod.AddRequestHeader(h.Key, string(h.RawValue))
 				default:
-					httpRecrod.RequestHeaders[h.Key] = string(h.Value)
+					httpRecrod.RequestHeaders[h.Key] = string(h.RawValue)
 				}
 			}
 

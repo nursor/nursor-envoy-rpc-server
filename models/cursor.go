@@ -168,7 +168,7 @@ func InitDB() (*gorm.DB, error) {
 	}
 	mysqlPort := os.Getenv("MYSQL_PORT")
 	if mysqlPort == "" {
-		mysqlPort = "30409"
+		mysqlPort = "31494"
 	}
 	mysqlUser := os.Getenv("MYSQL_USER")
 	if mysqlUser == "" {
@@ -180,7 +180,7 @@ func InitDB() (*gorm.DB, error) {
 	}
 	mysqlDB := os.Getenv("MYSQL_DB")
 	if mysqlDB == "" {
-		mysqlDB = "nursor-test"
+		mysqlDB = "nursorv2"
 	}
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
