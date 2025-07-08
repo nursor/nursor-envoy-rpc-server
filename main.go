@@ -197,7 +197,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 											Header: &corev3.HeaderValue{
 												Key: "authorization",
 												// RawValue: []byte(fmt.Sprintf("Bearer %s", *cursorAccount.AccessToken)),
-												RawValue: []byte(fmt.Sprintf("Bearer %s", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlJCWUhXOTMyQTBUOEYyM0ZQUFpFMDhaIiwidGltZSI6IjE3NTExODg2MDgiLCJyYW5kb21uZXNzIjoiYzRkNDUwZGQtN2VmMC00ZjE5IiwiZXhwIjoxNzU2MzcyNjA4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.mLL8FQe-aAB-I1XzCdjjPaHxjB6MOetIK4CKIACHUN0")),
+												RawValue: []byte(fmt.Sprintf("Bearer %s", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU")),
 											},
 											// TODO： 是不是还需要修改x-cleint-id字段？
 											Append: wrapperspb.Bool(false),
@@ -205,7 +205,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 										// {
 										// 	Header: &corev3.HeaderValue{
 										// 		Key:      "x-client-key",
-										// 		RawValue: []byte(fmt.Sprintf("%s", cursorAccount.GetClientKey())),
+										// 		RawValue: []byte("c1193cf81a1778fd7e4e522c8f3ae4d7b2b856a81e8d8860a5c589dc2774ad26"),
 										// 	},
 										// },
 									},
