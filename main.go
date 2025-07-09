@@ -11,6 +11,7 @@ import (
 	"nursor-envoy-rpc/provider"
 	"nursor-envoy-rpc/service"
 	"nursor-envoy-rpc/utils"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ import (
 type extProcServer struct {
 	extprocv3.UnimplementedExternalProcessorServer
 }
+
+var defaultToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU"
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
 	var httpRecrod = nursor.NewRequestRecord()
@@ -197,17 +200,18 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 											Header: &corev3.HeaderValue{
 												Key: "authorization",
 												// RawValue: []byte(fmt.Sprintf("Bearer %s", *cursorAccount.AccessToken)),
-												RawValue: []byte(fmt.Sprintf("Bearer %s", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU")),
+												RawValue: []byte(fmt.Sprintf("Bearer %s", defaultToken)),
 											},
 											// TODO： 是不是还需要修改x-cleint-id字段？
 											Append: wrapperspb.Bool(false),
 										},
-										// {
-										// 	Header: &corev3.HeaderValue{
-										// 		Key:      "x-client-key",
-										// 		RawValue: []byte("c1193cf81a1778fd7e4e522c8f3ae4d7b2b856a81e8d8860a5c589dc2774ad26"),
-										// 	},
-										// },
+										{
+											Header: &corev3.HeaderValue{
+												Key:      "x-client-key",
+												RawValue: []byte("c1193cf81a1778fd7e4e522c8f3ae4d7b2b856a81e8d8860a5c589dc2774ad26"),
+											},
+											Append: wrapperspb.Bool(false),
+										},
 									},
 								},
 							},
@@ -322,6 +326,12 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 }
 
 func main() {
+
+	envToken := os.Getenv("TOKEN")
+	if envToken != "" {
+		defaultToken = envToken
+	}
+
 	listenAddr := ":8080"
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
