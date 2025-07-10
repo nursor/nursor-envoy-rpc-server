@@ -30,6 +30,7 @@ type extProcServer struct {
 	extprocv3.UnimplementedExternalProcessorServer
 }
 
+// eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU
 var defaultToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU"
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
@@ -103,6 +104,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						}
 						return nil
 					} else if !strings.Contains(string(h.RawValue), "cursor.sh") && !strings.Contains(string(h.RawValue), "cursor.com") {
+						// log.Println("not cursor.sh or cursor.com", string(h.RawValue))
+						// 只处理cursor.sh和cursor.com的请求
 						resp := &extprocv3.ProcessingResponse{
 							Response: &extprocv3.ProcessingResponse_RequestHeaders{
 								RequestHeaders: &extprocv3.HeadersResponse{
@@ -117,6 +120,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 							log.Printf("Error sending response: %v", err)
 							return err
 						}
+						return nil
 					}
 
 				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "AuthService/GetEmail") {
