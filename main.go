@@ -102,8 +102,45 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 							return err
 						}
 						return nil
+					} else if !strings.Contains(string(h.RawValue), "cursor.sh") && !strings.Contains(string(h.RawValue), "cursor.com") {
+						resp := &extprocv3.ProcessingResponse{
+							Response: &extprocv3.ProcessingResponse_RequestHeaders{
+								RequestHeaders: &extprocv3.HeadersResponse{
+									Response: &extprocv3.CommonResponse{
+										HeaderMutation: &extprocv3.HeaderMutation{},
+									},
+								},
+							},
+						}
+
+						if err := stream.Send(resp); err != nil {
+							log.Printf("Error sending response: %v", err)
+							return err
+						}
 					}
+
+				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "AuthService/GetEmail") {
+					resp := &extprocv3.ProcessingResponse{
+						Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+							ImmediateResponse: &extprocv3.ImmediateResponse{
+								Body: string([]byte{
+									0x0a, 0x10, // 前两个字节
+									0x6a, 0x69, 0x6d, 0x6d, 0x79, 0x6c, 0x65, 0x65, // jimmylee
+									0x40,                                     // @
+									0x6d, 0x69, 0x74, 0x2e, 0x65, 0x64, 0x75, // mit.edu
+									0x10, 0x01, // 后两个字节
+								}),
+							},
+						},
+					}
+
+					if err := stream.Send(resp); err != nil {
+						log.Printf("Error sending response: %v", err)
+						return err
+					}
+					return nil
 				}
+
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
