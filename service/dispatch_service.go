@@ -229,7 +229,7 @@ func KeepTokenQueueAvailable(ctx context.Context) {
 func init() {
 	go func() {
 		for {
-			KeepTokenQueueAvailable(context.TODO())
+			// KeepTokenQueueAvailable(context.TODO())
 			time.Sleep(10 * time.Second)
 		}
 	}()
