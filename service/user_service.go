@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"nursor-envoy-rpc/helper"
 	"nursor-envoy-rpc/models"
 	"strings"
@@ -63,40 +62,6 @@ func (us *UserService) initialize(db *gorm.DB, redisClient *redis.Client) {
 }
 
 // CheckAndGetUserFromInnerToken validates the token in an HTTP flow and sets user info.
-func (us *UserService) CheckAndGetUserFromInnerToken(ctx context.Context, authrozationValue string) (*models.User, error) {
-	parts := strings.Split(authrozationValue, " ")
-	if len(parts) < 2 {
-		return nil, errors.New("invalid authorization header")
-	}
-	fakeInnerToken := parts[1]
-
-	if fakeInnerToken == "" {
-		return nil, errors.New("empty token")
-	}
-
-	// Extract inner token
-	innerTokenParts := strings.Split(fakeInnerToken, ".")
-	innerToken := innerTokenParts[len(innerTokenParts)-1]
-
-	// Check token availability
-	isAvailable, err := us.IsUserAvailable(ctx, innerToken)
-	if err != nil {
-		return nil, err
-	}
-	if !isAvailable {
-		logrus.Infof("Invalid or expired token: %s", innerToken)
-		return nil, errors.New("invalid or expired token")
-	}
-
-	userInfo, err := us.GetUserByInnerTokenFromDB(ctx, innerToken)
-	if err != nil {
-		return nil, err
-	}
-
-	return userInfo, nil
-}
-
-// CheckAndGetUserFromInnerToken validates the token in an HTTP flow and sets user info.
 func (us *UserService) CheckAndGetUserFromBindingtoken(ctx context.Context, authrozationValue string) (*models.User, error) {
 	// Check token availability
 	if strings.Contains(authrozationValue, "Bearer") {
@@ -108,25 +73,22 @@ func (us *UserService) CheckAndGetUserFromBindingtoken(ctx context.Context, auth
 		return nil, err
 	}
 
-	isAvailable, err := us.IsUserAvailable(ctx, user.InnerToken)
+	isAvailable, err := us.IsUserAvailable(ctx, user)
 	if err != nil {
 		return nil, err
 	}
 	if !isAvailable {
-		logrus.Infof("Invalid or expired token: %s", user.InnerToken)
-		return nil, errors.New("invalid or expired token")
+		uspt, err := us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
+		if err != nil {
+			return nil, err
+		}
+		if uspt == nil {
+			return nil, errors.New("no pending subscription")
+		}
+		return user, nil
 	}
 
 	return user, nil
-}
-
-func (us *UserService) GetUserByInnerTokenFromDB(ctx context.Context, innerToken string) (*models.User, error) {
-	var user models.User
-	err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
 }
 
 func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken string) (*models.User, error) {
@@ -154,29 +116,83 @@ func (us *UserService) GetUserByID(ctx context.Context, userID int) (*models.Use
 }
 
 // IsUserAvailable checks if a user is available based on their inner token.
-func (us *UserService) IsUserAvailable(ctx context.Context, innerToken string) (bool, error) {
-	user, err := us.GetUserByInnerToken(ctx, innerToken)
-	if err != nil {
-		return false, err
-	}
+func (us *UserService) IsUserAvailable(ctx context.Context, user *models.User) (bool, error) {
 	if user == nil {
 		return false, nil
 	}
 
-	usage := user.Usage
-	limit := user.Limit
-	if usage > limit {
+	uspt := models.UserSubscription{}
+	uspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(user.ID), "active")
+	if err != nil {
+		return false, err
+	}
+	if len(uspts) == 0 {
 		return false, nil
 	}
 
-	expiredAt := user.ExpiredAt
-	if expiredAt == nil {
-		return false, fmt.Errorf("invalid expired_at format")
+	isAvailable := false
+	for _, uspt = range uspts {
+		if uspt.EndDate.Before(time.Now()) {
+			uspt.Status = "expired"
+			us.db.WithContext(ctx).Save(&uspt)
+			continue
+		}
+		if uspt.UsedTraffic >= *uspt.Subscription.TrafficLimit {
+			uspt.Status = "expired"
+			us.db.WithContext(ctx).Save(&uspt)
+			continue
+		}
+		if uspt.CursorAskUsage >= uspt.Subscription.CursorAskCount {
+			uspt.Status = "expired"
+			us.db.WithContext(ctx).Save(&uspt)
+			continue
+		}
+		isAvailable = true
+		break
 	}
-	if expiredAt.Before(time.Now().UTC()) {
-		return false, nil
+
+	return isAvailable, nil
+}
+
+func (us *UserService) ActiveNewSubscriptionFromPending(ctx context.Context, userID int) (*models.UserSubscription, error) {
+	uspt := models.UserSubscription{}
+	// 检查是否已有激活的订阅
+	activeUspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(userID), "active")
+	if err != nil {
+		return nil, err
 	}
-	return true, nil
+	if len(activeUspts) > 0 {
+		return nil, nil // 已有激活的订阅,不进行操作
+	}
+
+	// // 使用分布式锁确保并发安全
+	// lockKey := fmt.Sprintf("user_subscription_lock:%d", userID)
+	// lock := redislock.New(&redislock.GoRedisClient{Client: us.defaultRedis})
+	// lockCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// defer cancel()
+
+	// locker, err := lock.Obtain(lockCtx, lockKey, 10*time.Second, nil)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("获取锁失败: %v", err)
+	// }
+	// defer locker.Release(ctx)
+
+	uspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(userID), "pending")
+	if err != nil {
+		return nil, err
+	}
+	if len(uspts) == 0 {
+		return nil, errors.New("no pending subscription")
+	}
+	uspt = uspts[0]
+	uspt.Status = "active"
+	uspt.StartDate = time.Now()
+	uspt.EndDate = uspt.StartDate.AddDate(0, 0, uspt.Subscription.Duration)
+	err = us.db.WithContext(ctx).Save(&uspt).Error
+	if err != nil {
+		return nil, err
+	}
+	return &uspt, nil
 }
 
 func (us *UserService) IncrementTokenUsage(ctx context.Context, innerToken string) error {
@@ -184,11 +200,23 @@ func (us *UserService) IncrementTokenUsage(ctx context.Context, innerToken strin
 	if err != nil {
 		return err
 	}
-	if user == nil {
-		return errors.New("user not found")
+	uspt := models.UserSubscription{}
+	uspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(user.ID), "active")
+	if err != nil {
+		return err
 	}
-	user.Usage++
-	err = us.db.WithContext(ctx).Save(&user).Error
+	if len(uspts) == 0 {
+		return errors.New("no active subscription")
+	}
+	uspt = uspts[0]
+	uspt.CursorAskUsage++
+	if uspt.CursorAskUsage >= uspt.Subscription.CursorAskCount {
+		uspt.Status = "expired"
+		us.db.WithContext(ctx).Save(&uspt)
+		return errors.New("cursor ask usage limit reached")
+	}
+	us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
+	err = us.db.WithContext(ctx).Save(&uspt).Error
 	if err != nil {
 		return err
 	}

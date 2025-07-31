@@ -143,6 +143,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						return err
 					}
 					return nil
+				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "GetTeam") {
+					fmt.Print("in get Eamil")
 				}
 
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
