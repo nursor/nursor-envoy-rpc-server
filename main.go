@@ -43,7 +43,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 		go func() {
 			log.Printf("Stream closed after %s", time.Since(timeA))
 			if httpRecrod != nil {
-				provider.PushHttpRequestToDB(httpRecrod)
+				provider.PushHttpRequestToCache(httpRecrod)
 			}
 			if isChatRequest {
 				if !isChatHasException {
@@ -86,6 +86,17 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			log.Println("Received request headers")
 			headers := r.RequestHeaders.GetHeaders()
 			isAuthHeaderExisted := false
+
+			// 从headers中提取nursor-token
+			var innerToken string
+			for _, h := range headers.Headers {
+				if strings.ToLower(h.Key) == "nursor-token" {
+					innerToken = string(h.RawValue)
+					httpRecrod.InnerTokenId = innerToken
+					log.Printf("Found and set nursor-token: %s", innerToken)
+					break
+				}
+			}
 
 			for _, h := range headers.Headers {
 				httpRecrod.AddRequestHeader(h.Key, string(h.RawValue))
@@ -147,27 +158,33 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					fmt.Print("in get Eamil")
 				}
 
-				if strings.Contains(string(h.Key), "nursor-token") {
-					print("iner-token", string(h.RawValue))
-				}
-
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
 					orgAuth := string(h.RawValue)
 					userService := service.GetUserServiceInstance()
+					var userInfo *models.User
 					// userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
 					// 新版本，使用用户数据库的绑定token
-					userInfo, err := userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
-					if err != nil {
-						log.Printf("Error parsing token: %v", err)
-						resp := utils.GetResponseForErr(err)
-						// 发送响应，终止流程
-						if err := stream.Send(resp); err != nil {
-							log.Printf("Failed to send immediate response: %v", err)
+					if innerToken != "" {
+						userInfo, err = userService.GetUserByInnerToken(ctx, innerToken)
+						if err != nil {
+							log.Printf("Error getting user by inner token: %v", err)
 						}
-						return err
 					}
+					if userInfo == nil {
+						userInfo, err = userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
+						if err != nil {
+							log.Printf("Error parsing token: %v", err)
+							resp := utils.GetResponseForErr(err)
+							// 发送响应，终止流程
+							if err := stream.Send(resp); err != nil {
+								log.Printf("Failed to send immediate response: %v", err)
+							}
+							return err
+						}
+					}
+
 					if userInfo == nil {
 						log.Println("Token not valid")
 						resp := utils.GetResponseForExpireError()
@@ -378,6 +395,23 @@ func main() {
 	if envToken != "" {
 		defaultToken = envToken
 	}
+
+	// 启动Kafka消费者
+	log.Println("Starting Kafka consumer...")
+	kafkaConsumer := provider.GetKafkaConsumer()
+	if err := kafkaConsumer.Start(); err != nil {
+		log.Fatalf("Failed to start Kafka consumer: %v", err)
+	}
+	log.Println("Kafka consumer started successfully")
+
+	// 设置优雅关闭
+	defer func() {
+		log.Println("Shutting down Kafka consumer...")
+		if err := kafkaConsumer.Stop(); err != nil {
+			log.Printf("Error stopping Kafka consumer: %v", err)
+		}
+		log.Println("Kafka consumer stopped")
+	}()
 
 	listenAddr := ":8080"
 	lis, err := net.Listen("tcp", listenAddr)

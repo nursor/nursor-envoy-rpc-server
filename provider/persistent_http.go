@@ -13,10 +13,8 @@ var kafkaTopic = "http-records"
 
 var kafkaWriter *kafka.Writer
 
-func PushHttpRequestToDB(req *httpRecord.HttpRecord) error {
-
+func PushHttpRequestToCache(req *httpRecord.HttpRecord) error {
 	writer := GetKafkaWriter()
-
 	recordJson, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -31,7 +29,6 @@ func PushHttpRequestToDB(req *httpRecord.HttpRecord) error {
 	}
 	log.Println("Message sent to Kafka:")
 	return nil
-
 }
 
 func GetKafkaWriter() *kafka.Writer {
