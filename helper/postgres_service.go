@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	httpRecord "nursor-envoy-rpc/models/nursor"
@@ -14,9 +15,14 @@ import (
 )
 
 var postgresDB *gorm.DB
+var enableSQLLogs bool = false // 控制SQL日志输出
+var dbMutex sync.Mutex         // 添加互斥锁保护数据库连接
 
 // GetPostgresDB 获取PostgreSQL数据库连接
 func GetPostgresDB() *gorm.DB {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
 	if postgresDB != nil {
 		return postgresDB
 	}
@@ -55,9 +61,9 @@ func GetPostgresDB() *gorm.DB {
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=%s",
 		POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE, POSTGRES_PORT, POSTGRES_TIMEZONE)
 
-	// 配置GORM
+	// 配置GORM - 禁用SQL日志输出
 	config := &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Error), // 只显示错误，不显示SQL查询
 	}
 
 	// 连接数据库
@@ -72,14 +78,58 @@ func GetPostgresDB() *gorm.DB {
 		log.Fatalf("Failed to get underlying sql.DB: %v", err)
 	}
 
-	// 设置连接池参数
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	// 设置连接池参数 - 优化连接池配置
+	sqlDB.SetMaxIdleConns(5)                   // 减少空闲连接数
+	sqlDB.SetMaxOpenConns(20)                  // 减少最大连接数，避免超过PostgreSQL限制
+	sqlDB.SetConnMaxLifetime(30 * time.Minute) // 减少连接生命周期
 
 	postgresDB = db
-	log.Println("PostgreSQL connection established successfully")
+	// 注释掉连接成功日志，减少日志输出
+	// log.Println("PostgreSQL connection established successfully")
 	return postgresDB
+}
+
+// EnableSQLLogs 启用或禁用SQL日志输出
+func EnableSQLLogs(enabled bool) {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
+	enableSQLLogs = enabled
+	// 注意：不强制重新连接，避免连接数过多
+	// 如果需要重新应用日志设置，建议重启应用
+}
+
+// GetDBStats 获取数据库连接池统计信息
+func GetDBStats() map[string]interface{} {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
+	if postgresDB == nil {
+		return map[string]interface{}{
+			"status": "not_connected",
+		}
+	}
+
+	sqlDB, err := postgresDB.DB()
+	if err != nil {
+		return map[string]interface{}{
+			"status": "error",
+			"error":  err.Error(),
+		}
+	}
+
+	stats := sqlDB.Stats()
+	return map[string]interface{}{
+		"status":              "connected",
+		"max_open_conns":      stats.MaxOpenConnections,
+		"open_conns":          stats.OpenConnections,
+		"in_use":              stats.InUse,
+		"idle":                stats.Idle,
+		"wait_count":          stats.WaitCount,
+		"wait_duration":       stats.WaitDuration,
+		"max_idle_closed":     stats.MaxIdleClosed,
+		"max_lifetime_closed": stats.MaxLifetimeClosed,
+	}
 }
 
 // HttpRecordModel PostgreSQL中的HTTP记录模型
@@ -129,8 +179,8 @@ func SaveHttpRecord(record *httpRecord.HttpRecord) error {
 		return fmt.Errorf("failed to save HTTP record to PostgreSQL: %v", err)
 	}
 
-	log.Printf("HTTP record saved to PostgreSQL: ID=%d, URL=%s, Method=%s, Status=%d",
-		httpRecordModel.ID, record.Url, record.Method, record.Status)
+	// log.Printf("HTTP record saved to PostgreSQL: ID=%d, URL=%s, Method=%s, Status=%d",
+	// httpRecordModel.ID, record.Url, record.Method, record.Status)
 
 	return nil
 }
@@ -444,7 +494,8 @@ func InitHttpRecordsTable() error {
 
 	// 检查表是否存在
 	if !db.Migrator().HasTable(&HttpRecordModel{}) {
-		log.Println("HTTP records table does not exist, creating...")
+		// 注释掉表创建日志，减少日志输出
+		// log.Println("HTTP records table does not exist, creating...")
 	}
 
 	// 自动迁移表结构（如果表不存在会创建，如果存在会更新结构）
@@ -457,7 +508,8 @@ func InitHttpRecordsTable() error {
 		return fmt.Errorf("failed to create composite indexes: %v", err)
 	}
 
-	log.Println("HTTP records table initialized successfully")
+	// 注释掉初始化成功日志，减少日志输出
+	// log.Println("HTTP records table initialized successfully")
 	return nil
 }
 
@@ -505,10 +557,12 @@ func createCompositeIndexes(db *gorm.DB) error {
 	// 执行创建索引
 	for _, idx := range indexes {
 		if err := db.Exec(idx.sql).Error; err != nil {
-			log.Printf("Warning: Failed to create index %s: %v", idx.name, err)
+			// 注释掉索引创建日志，减少日志输出
+			// log.Printf("Warning: Failed to create index %s: %v", idx.name, err)
 			// 不返回错误，因为索引可能已经存在
 		} else {
-			log.Printf("Created index: %s", idx.name)
+			// 注释掉索引创建成功日志，减少日志输出
+			// log.Printf("Created index: %s", idx.name)
 		}
 	}
 
