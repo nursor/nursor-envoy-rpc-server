@@ -45,9 +45,15 @@ func GetPostgresDB() *gorm.DB {
 		POSTGRES_DATABASE = "nursor_http_records"
 	}
 
+	// 时区配置
+	POSTGRES_TIMEZONE := os.Getenv("POSTGRES_TIMEZONE")
+	if POSTGRES_TIMEZONE == "" {
+		POSTGRES_TIMEZONE = "UTC" // 默认使用UTC时区
+	}
+
 	// 构建DSN
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Shanghai",
-		POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE, POSTGRES_PORT)
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=%s",
+		POSTGRES_HOST, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE, POSTGRES_PORT, POSTGRES_TIMEZONE)
 
 	// 配置GORM
 	config := &gorm.Config{
