@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -42,19 +43,26 @@ func (kc *KafkaConsumer) Initialize() error {
 	brokerAddr := "172.16.238.2:30631"
 	topic := kafkaTopic
 
-	// 创建Kafka Reader
+	// 检查Topic是否存在
+	if err := kc.checkTopicExists(brokerAddr, topic); err != nil {
+		log.Printf("Warning: Topic check failed: %v", err)
+	}
+
+	// 创建Kafka Reader - 使用简单消费者模式，不使用 Consumer Group
 	kc.reader = kafka.NewReader(kafka.ReaderConfig{
-		Brokers:         []string{brokerAddr},
-		Topic:           topic,
-		GroupID:         "http-records-consumer-group",
-		MinBytes:        10e3, // 10KB
-		MaxBytes:        10e6, // 10MB
-		MaxWait:         1 * time.Second,
+		Brokers: []string{brokerAddr},
+		Topic:   topic,
+		// GroupID:         "http-records-consumer-group", // 注释掉 Group ID，使用简单消费者
+		MinBytes:        1,               // 降低最小字节数，避免等待过多数据
+		MaxBytes:        10e6,            // 10MB
+		MaxWait:         5 * time.Second, // 增加等待时间
 		ReadLagInterval: -1,
-		CommitInterval:  1 * time.Second,
+		// CommitInterval:  1 * time.Second, // 简单消费者不需要提交偏移量
+		StartOffset: kafka.LastOffset,             // 从最新消息开始消费
+		Logger:      kafka.LoggerFunc(log.Printf), // 添加日志
 	})
 
-	log.Println("Kafka consumer initialized successfully")
+	log.Printf("Kafka consumer initialized successfully - Broker: %s, Topic: %s", brokerAddr, topic)
 	return nil
 }
 
@@ -114,6 +122,8 @@ func (kc *KafkaConsumer) Stop() error {
 // consumeMessages 消费消息的主循环
 func (kc *KafkaConsumer) consumeMessages() {
 	ctx := context.Background()
+	consecutiveErrors := 0
+	maxConsecutiveErrors := 5
 
 	for {
 		select {
@@ -124,10 +134,35 @@ func (kc *KafkaConsumer) consumeMessages() {
 			// 读取消息
 			message, err := kc.reader.ReadMessage(ctx)
 			if err != nil {
-				log.Printf("Error reading message from Kafka: %v", err)
-				time.Sleep(1 * time.Second) // 避免无限循环
+				consecutiveErrors++
+				log.Printf("Error reading message from Kafka (attempt %d/%d): %v", consecutiveErrors, maxConsecutiveErrors, err)
+
+				// 检查是否是 EOF 错误（没有消息）
+				if err.Error() == "EOF" {
+					log.Println("No messages available in topic, waiting...")
+					time.Sleep(5 * time.Second) // 等待更长时间
+					continue
+				}
+
+				// 如果是连续错误过多，尝试重新初始化连接
+				if consecutiveErrors >= maxConsecutiveErrors {
+					log.Println("Too many consecutive errors, attempting to reinitialize connection...")
+					if err := kc.reinitializeConnection(); err != nil {
+						log.Printf("Failed to reinitialize connection: %v", err)
+						time.Sleep(5 * time.Second)
+					} else {
+						consecutiveErrors = 0
+						log.Println("Connection reinitialized successfully")
+					}
+				}
+
+				time.Sleep(2 * time.Second) // 增加重试间隔
 				continue
 			}
+
+			// 成功读取消息，重置错误计数
+			consecutiveErrors = 0
+			log.Printf("Successfully read message from Kafka: offset=%d, partition=%d", message.Offset, message.Partition)
 
 			// 处理消息
 			kc.wg.Add(1)
@@ -163,6 +198,42 @@ func (kc *KafkaConsumer) processMessage(message kafka.Message) {
 // IsRunning 检查消费者是否正在运行
 func (kc *KafkaConsumer) IsRunning() bool {
 	return kc.isRunning
+}
+
+// checkTopicExists 检查Topic是否存在
+func (kc *KafkaConsumer) checkTopicExists(brokerAddr, topic string) error {
+	conn, err := kafka.Dial("tcp", brokerAddr)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Kafka broker: %v", err)
+	}
+	defer conn.Close()
+
+	partitions, err := conn.ReadPartitions(topic)
+	if err != nil {
+		return fmt.Errorf("failed to read partitions for topic %s: %v", topic, err)
+	}
+
+	if len(partitions) == 0 {
+		return fmt.Errorf("topic %s does not exist or has no partitions", topic)
+	}
+
+	log.Printf("Topic %s exists with %d partitions", topic, len(partitions))
+	return nil
+}
+
+// reinitializeConnection 重新初始化Kafka连接
+func (kc *KafkaConsumer) reinitializeConnection() error {
+	log.Println("Reinitializing Kafka connection...")
+
+	// 关闭现有连接
+	if kc.reader != nil {
+		if err := kc.reader.Close(); err != nil {
+			log.Printf("Error closing existing reader: %v", err)
+		}
+	}
+
+	// 重新初始化
+	return kc.Initialize()
 }
 
 // GetStats 获取消费者统计信息

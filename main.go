@@ -156,6 +156,18 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					return nil
 				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "GetTeam") {
 					fmt.Print("in get Eamil")
+				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "ReportBug") {
+					resp := &extprocv3.ProcessingResponse{
+						Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+							ImmediateResponse: &extprocv3.ImmediateResponse{},
+						},
+					}
+
+					if err := stream.Send(resp); err != nil {
+						log.Printf("Error sending response: %v", err)
+						return err
+					}
+					return nil
 				}
 
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
