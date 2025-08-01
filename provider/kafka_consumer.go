@@ -21,20 +21,36 @@ var (
 
 // KafkaConsumer Kafka消费者结构体
 type KafkaConsumer struct {
-	reader    *kafka.Reader
-	isRunning bool
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
+	reader     *kafka.Reader
+	isRunning  bool
+	stopChan   chan struct{}
+	wg         sync.WaitGroup
+	debugMode  bool          // 添加调试模式开关
+	workerPool chan struct{} // 工作池，限制并发处理数量
 }
 
 // GetKafkaConsumer 获取Kafka消费者单例
 func GetKafkaConsumer() *KafkaConsumer {
 	consumerOnce.Do(func() {
 		kafkaConsumer = &KafkaConsumer{
-			stopChan: make(chan struct{}),
+			stopChan:   make(chan struct{}),
+			debugMode:  false,                  // 默认关闭调试模式
+			workerPool: make(chan struct{}, 5), // 限制最多5个并发工作协程
 		}
 	})
 	return kafkaConsumer
+}
+
+// SetDebugMode 设置调试模式
+func (kc *KafkaConsumer) SetDebugMode(enabled bool) {
+	kc.debugMode = enabled
+}
+
+// debugLog 根据调试模式输出日志
+func (kc *KafkaConsumer) debugLog(format string, args ...interface{}) {
+	if kc.debugMode {
+		log.Printf(format, args...)
+	}
 }
 
 // Initialize 初始化Kafka消费者
@@ -58,11 +74,12 @@ func (kc *KafkaConsumer) Initialize() error {
 		MaxWait:         5 * time.Second, // 增加等待时间
 		ReadLagInterval: -1,
 		// CommitInterval:  1 * time.Second, // 简单消费者不需要提交偏移量
-		StartOffset: kafka.LastOffset,             // 从最新消息开始消费
-		Logger:      kafka.LoggerFunc(log.Printf), // 添加日志
+		StartOffset: kafka.LastOffset, // 从最新消息开始消费
+		// Logger:      kafka.LoggerFunc(log.Printf), // 注释掉Kafka日志，减少日志输出
 	})
 
-	log.Printf("Kafka consumer initialized successfully - Broker: %s, Topic: %s", brokerAddr, topic)
+	// 注释掉初始化成功的日志，减少日志输出
+	// log.Printf("Kafka consumer initialized successfully - Broker: %s, Topic: %s", brokerAddr, topic)
 	return nil
 }
 
@@ -139,7 +156,8 @@ func (kc *KafkaConsumer) consumeMessages() {
 
 				// 检查是否是 EOF 错误（没有消息）
 				if err.Error() == "EOF" {
-					log.Println("No messages available in topic, waiting...")
+					// 注释掉 EOF 日志，减少日志输出
+					// log.Println("No messages available in topic, waiting...")
 					time.Sleep(5 * time.Second) // 等待更长时间
 					continue
 				}
@@ -162,12 +180,17 @@ func (kc *KafkaConsumer) consumeMessages() {
 
 			// 成功读取消息，重置错误计数
 			consecutiveErrors = 0
-			log.Printf("Successfully read message from Kafka: offset=%d, partition=%d", message.Offset, message.Partition)
+			kc.debugLog("Successfully read message from Kafka: offset=%d, partition=%d", message.Offset, message.Partition)
 
-			// 处理消息
+			// 处理消息 - 使用工作池限制并发数
 			kc.wg.Add(1)
 			go func(msg kafka.Message) {
 				defer kc.wg.Done()
+
+				// 获取工作池槽位
+				kc.workerPool <- struct{}{}
+				defer func() { <-kc.workerPool }()
+
 				kc.processMessage(msg)
 			}(message)
 		}
@@ -176,7 +199,7 @@ func (kc *KafkaConsumer) consumeMessages() {
 
 // processMessage 处理单条消息
 func (kc *KafkaConsumer) processMessage(message kafka.Message) {
-	log.Printf("Processing message: offset=%d, partition=%d", message.Offset, message.Partition)
+	kc.debugLog("Processing message: offset=%d, partition=%d", message.Offset, message.Partition)
 
 	// 解析HTTP记录
 	var httpRecord httpRecord.HttpRecord
@@ -191,7 +214,7 @@ func (kc *KafkaConsumer) processMessage(message kafka.Message) {
 		return
 	}
 
-	log.Printf("Successfully processed and saved HTTP record: URL=%s, Method=%s, Status=%d",
+	kc.debugLog("Successfully processed and saved HTTP record: URL=%s, Method=%s, Status=%d",
 		httpRecord.Url, httpRecord.Method, httpRecord.Status)
 }
 
