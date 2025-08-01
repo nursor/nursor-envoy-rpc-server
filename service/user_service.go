@@ -213,9 +213,15 @@ func (us *UserService) IncrementTokenUsage(ctx context.Context, innerToken strin
 	if uspt.CursorAskUsage >= uspt.Subscription.CursorAskCount {
 		uspt.Status = "expired"
 		us.db.WithContext(ctx).Save(&uspt)
+		us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
 		return errors.New("cursor ask usage limit reached")
 	}
-	us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
+	if uspt.EndDate.Before(time.Now()) {
+		uspt.Status = "expired"
+		us.db.WithContext(ctx).Save(&uspt)
+		us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
+		return errors.New("subscription expired")
+	}
 	err = us.db.WithContext(ctx).Save(&uspt).Error
 	if err != nil {
 		return err

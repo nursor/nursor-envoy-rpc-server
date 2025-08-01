@@ -147,6 +147,10 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					fmt.Print("in get Eamil")
 				}
 
+				if strings.Contains(string(h.Key), "nursor-token") {
+					print("iner-token", string(h.RawValue))
+				}
+
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
