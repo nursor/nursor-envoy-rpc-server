@@ -29,10 +29,11 @@ HTTP请求 → Envoy代理 → 本服务 → Kafka队列 → Kafka消费者 → 
 ```bash
 # PostgreSQL连接配置
 POSTGRES_HOST=172.16.238.2      # PostgreSQL主机地址
-POSTGRES_PORT=5432              # PostgreSQL端口
+POSTGRES_PORT=31279             # PostgreSQL端口
 POSTGRES_USER=postgres          # 数据库用户名
-POSTGRES_PASSWORD=postgres      # 数据库密码
+POSTGRES_PASSWORD=asd123456     # 数据库密码
 POSTGRES_DATABASE=nursor_http_records  # 数据库名称
+POSTGRES_TIMEZONE=UTC           # 时区设置（可选，默认为UTC）
 ```
 
 #### Kafka配置
@@ -115,6 +116,30 @@ GROUP BY request_headers->>'User-Agent';
 1. **存储空间**：JSONB格式可能比普通字符串稍大
 2. **查询复杂度**：需要学习PostgreSQL的JSONB操作符
 3. **版本兼容性**：需要PostgreSQL 9.4+版本
+
+### 时区配置
+
+PostgreSQL连接默认使用UTC时区，确保跨时区的一致性。可以通过环境变量`POSTGRES_TIMEZONE`来配置时区：
+
+```bash
+# 使用UTC时区（默认）
+POSTGRES_TIMEZONE=UTC
+
+# 使用其他时区（需要PostgreSQL支持）
+POSTGRES_TIMEZONE=America/New_York
+POSTGRES_TIMEZONE=Europe/London
+```
+
+**注意事项：**
+1. 确保PostgreSQL服务器支持指定的时区
+2. 如果时区不存在，连接会失败
+3. 建议使用UTC时区以确保一致性
+
+**在查询时转换时区**：
+```sql
+SELECT created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai' as local_time 
+FROM http_records;
+```
 
 ## 使用方法
 
