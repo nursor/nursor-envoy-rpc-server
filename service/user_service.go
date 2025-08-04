@@ -97,6 +97,21 @@ func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken strin
 	if err != nil {
 		return nil, err
 	}
+	isAvailable, err := us.IsUserAvailable(ctx, &user)
+	if err != nil {
+		return nil, err
+	}
+	if !isAvailable {
+		uspt, err := us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
+		if err != nil {
+			return nil, err
+		}
+		if uspt == nil {
+			return nil, errors.New("no pending subscription")
+		}
+		return &user, nil
+	}
+
 	return &user, nil
 }
 

@@ -254,7 +254,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					Response: &extprocv3.ProcessingResponse_RequestHeaders{
 						RequestHeaders: &extprocv3.HeadersResponse{
 							Response: &extprocv3.CommonResponse{
-								HeaderMutation: &extprocv3.HeaderMutation{},
+								HeaderMutation: &extprocv3.HeaderMutation{
+									RemoveHeaders: []string{"nursor-token"},
+								},
 							},
 						},
 					},
@@ -270,7 +272,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						RequestHeaders: &extprocv3.HeadersResponse{
 							Response: &extprocv3.CommonResponse{
 								HeaderMutation: &extprocv3.HeaderMutation{
-									RemoveHeaders: []string{"authorization"},
+									RemoveHeaders: []string{"authorization", "nursor-token"},
 									SetHeaders: []*corev3.HeaderValueOption{
 										{
 											Header: &corev3.HeaderValue{
