@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"nursor-envoy-rpc/helper"
 	"nursor-envoy-rpc/models"
 	"strings"
@@ -11,19 +13,18 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/sirupsen/logrus"
-	"github.com/zeromicro/go-zero/core/stores/sqlx"
 	"gorm.io/gorm"
 )
 
 // UserService manages user-related operations with Redis caching and token validation.
 type UserService struct {
-	defaultRedis      *redis.Client
-	db                *gorm.DB
-	conn              sqlx.SqlConn
-	redisDispatcher   *helper.RedisOperator
-	userCachePrefix   string
-	userCachePrefixID string
-	initialized       bool
+	defaultRedis                *redis.Client
+	db                          *gorm.DB
+	redisDispatcher             *helper.RedisOperator
+	userCachePrefix             string
+	userCachePrefixID           string
+	userSubscriptionCachePrefix string
+	initialized                 bool
 }
 
 // singleton instance
@@ -55,8 +56,9 @@ func (us *UserService) initialize(db *gorm.DB, redisClient *redis.Client) {
 	us.defaultRedis = redisClient
 	us.db = db
 
-	us.userCachePrefix = "user_cache:token"
+	us.userCachePrefix = "user_cache:innertoken:"
 	us.userCachePrefixID = "user_cache:id"
+	us.userSubscriptionCachePrefix = "user_subscription_cache:"
 	us.redisDispatcher = helper.GetInstanceRedisOperator()
 	us.initialized = true
 }
@@ -93,10 +95,29 @@ func (us *UserService) CheckAndGetUserFromBindingtoken(ctx context.Context, auth
 
 func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken string) (*models.User, error) {
 	var user models.User
-	err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
-	if err != nil {
-		return nil, err
+	usercache := us.defaultRedis.Get(ctx, us.userCachePrefix+innerToken)
+	if usercache != nil {
+		cacheBytes, err := usercache.Bytes()
+		if err == nil {
+			err := json.Unmarshal(cacheBytes, &user)
+			if err != nil {
+				err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
+				if err != nil {
+					return nil, err
+				}
+				us.defaultRedis.Set(ctx, us.userCachePrefix+innerToken, cacheBytes, 5*time.Minute)
+			}
+		}
 	}
+	if user.ID == 0 {
+		err := us.db.WithContext(ctx).Where("inner_token = ?", innerToken).First(&user).Error
+		if err != nil {
+			return nil, err
+		}
+		cacheBytes, _ := json.Marshal(user)
+		us.defaultRedis.Set(ctx, us.userCachePrefix+innerToken, cacheBytes, 5*time.Minute)
+	}
+
 	isAvailable, err := us.IsUserAvailable(ctx, &user)
 	if err != nil {
 		return nil, err
@@ -113,6 +134,48 @@ func (us *UserService) GetUserByInnerToken(ctx context.Context, innerToken strin
 	}
 
 	return &user, nil
+}
+
+// GetUserSubscriptionsByUserIDAndStatus retrieves user subscriptions with Redis caching
+func (us *UserService) GetUserSubscriptionsByUserIDAndStatus(ctx context.Context, userID uint, status string) ([]models.UserSubscription, error) {
+	cacheKey := us.userSubscriptionCachePrefix + fmt.Sprintf("%d:%s", userID, status)
+
+	// Try to get from cache first
+	cacheResult := us.defaultRedis.Get(ctx, cacheKey)
+	var subscriptions []models.UserSubscription
+	if cacheResult != nil {
+		cacheBytes, err := cacheResult.Bytes()
+		if err == nil {
+			err := json.Unmarshal(cacheBytes, &subscriptions)
+			if err == nil {
+				return subscriptions, nil
+			}
+		}
+	}
+
+	// If not in cache or cache invalid, query from database
+	uspt := models.UserSubscription{}
+	subscriptions, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, userID, status)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result for 5 minutes
+	cacheBytes, _ := json.Marshal(subscriptions)
+	us.defaultRedis.Set(ctx, cacheKey, cacheBytes, 5*time.Minute)
+
+	return subscriptions, nil
+}
+
+// ClearUserSubscriptionCache clears the cache for a specific user's subscriptions
+func (us *UserService) ClearUserSubscriptionCache(ctx context.Context, userID uint) error {
+	// Clear cache for all possible statuses
+	statuses := []string{"active", "pending", "expired"}
+	for _, status := range statuses {
+		cacheKey := us.userSubscriptionCachePrefix + fmt.Sprintf("%d:%s", userID, status)
+		us.defaultRedis.Del(ctx, cacheKey)
+	}
+	return nil
 }
 
 // GetUserByID retrieves user information by user ID, using Redis cache.
@@ -135,9 +198,8 @@ func (us *UserService) IsUserAvailable(ctx context.Context, user *models.User) (
 	if user == nil {
 		return false, nil
 	}
-
-	uspt := models.UserSubscription{}
-	uspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(user.ID), "active")
+	// 一般只有一个
+	uspts, err := us.GetUserSubscriptionsByUserIDAndStatus(ctx, uint(user.ID), "active")
 	if err != nil {
 		return false, err
 	}
@@ -146,33 +208,36 @@ func (us *UserService) IsUserAvailable(ctx context.Context, user *models.User) (
 	}
 
 	isAvailable := false
-	for _, uspt = range uspts {
-		if uspt.EndDate.Before(time.Now()) {
-			uspt.Status = "expired"
-			us.db.WithContext(ctx).Save(&uspt)
+	for i := range uspts {
+		if uspts[i].EndDate.Before(time.Now()) {
+			uspts[i].Status = "expired"
+			us.db.WithContext(ctx).Save(&uspts[i])
 			continue
 		}
-		if uspt.UsedTraffic >= *uspt.Subscription.TrafficLimit {
-			uspt.Status = "expired"
-			us.db.WithContext(ctx).Save(&uspt)
+		if uspts[i].UsedTraffic >= *uspts[i].Subscription.TrafficLimit {
+			uspts[i].Status = "expired"
+			us.db.WithContext(ctx).Save(&uspts[i])
 			continue
 		}
-		if uspt.CursorAskUsage >= uspt.Subscription.CursorAskCount {
-			uspt.Status = "expired"
-			us.db.WithContext(ctx).Save(&uspt)
+		if uspts[i].CursorAskUsage >= uspts[i].Subscription.CursorAskCount {
+			uspts[i].Status = "expired"
+			us.db.WithContext(ctx).Save(&uspts[i])
 			continue
 		}
 		isAvailable = true
 		break
+	}
+	if !isAvailable {
+		us.ClearUserSubscriptionCache(ctx, uint(user.ID))
+
 	}
 
 	return isAvailable, nil
 }
 
 func (us *UserService) ActiveNewSubscriptionFromPending(ctx context.Context, userID int) (*models.UserSubscription, error) {
-	uspt := models.UserSubscription{}
 	// 检查是否已有激活的订阅
-	activeUspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(userID), "active")
+	activeUspts, err := us.GetUserSubscriptionsByUserIDAndStatus(ctx, uint(userID), "active")
 	if err != nil {
 		return nil, err
 	}
@@ -180,26 +245,14 @@ func (us *UserService) ActiveNewSubscriptionFromPending(ctx context.Context, use
 		return nil, nil // 已有激活的订阅,不进行操作
 	}
 
-	// // 使用分布式锁确保并发安全
-	// lockKey := fmt.Sprintf("user_subscription_lock:%d", userID)
-	// lock := redislock.New(&redislock.GoRedisClient{Client: us.defaultRedis})
-	// lockCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	// defer cancel()
-
-	// locker, err := lock.Obtain(lockCtx, lockKey, 10*time.Second, nil)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("获取锁失败: %v", err)
-	// }
-	// defer locker.Release(ctx)
-
-	uspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(userID), "pending")
+	uspts, err := us.GetUserSubscriptionsByUserIDAndStatus(ctx, uint(userID), "pending")
 	if err != nil {
 		return nil, err
 	}
 	if len(uspts) == 0 {
 		return nil, errors.New("no pending subscription")
 	}
-	uspt = uspts[0]
+	uspt := uspts[0]
 	uspt.Status = "active"
 	uspt.StartDate = time.Now()
 	uspt.EndDate = uspt.StartDate.AddDate(0, 0, uspt.Subscription.Duration)
@@ -207,6 +260,7 @@ func (us *UserService) ActiveNewSubscriptionFromPending(ctx context.Context, use
 	if err != nil {
 		return nil, err
 	}
+	us.ClearUserSubscriptionCache(ctx, uint(userID))
 	return &uspt, nil
 }
 
@@ -215,25 +269,26 @@ func (us *UserService) IncrementTokenUsage(ctx context.Context, innerToken strin
 	if err != nil {
 		return err
 	}
-	uspt := models.UserSubscription{}
-	uspts, err := uspt.FindUserSubscriptionsByUserIDAndStatus(us.db, uint(user.ID), "active")
+	uspts, err := us.GetUserSubscriptionsByUserIDAndStatus(ctx, uint(user.ID), "active")
 	if err != nil {
 		return err
 	}
 	if len(uspts) == 0 {
 		return errors.New("no active subscription")
 	}
-	uspt = uspts[0]
+	uspt := uspts[0]
 	uspt.CursorAskUsage++
 	if uspt.CursorAskUsage >= uspt.Subscription.CursorAskCount {
 		uspt.Status = "expired"
 		us.db.WithContext(ctx).Save(&uspt)
+		us.ClearUserSubscriptionCache(ctx, uint(user.ID))
 		us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
 		return errors.New("cursor ask usage limit reached")
 	}
 	if uspt.EndDate.Before(time.Now()) {
 		uspt.Status = "expired"
 		us.db.WithContext(ctx).Save(&uspt)
+		us.ClearUserSubscriptionCache(ctx, uint(user.ID))
 		us.ActiveNewSubscriptionFromPending(ctx, int(user.ID))
 		return errors.New("subscription expired")
 	}

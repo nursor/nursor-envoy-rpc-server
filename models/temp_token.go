@@ -8,12 +8,12 @@ import (
 
 // TempToken represents the temporary token model.
 type TempToken struct {
-	ID        uint      `gorm:"primaryKey;autoIncrement"`
-	UserID    *uint     `gorm:"column:user_id;index;comment:关联用户ID"` // Foreign key to User model
-	Token     string    `gorm:"column:token;type:varchar(255);unique;not null;comment:临时token"`
-	Status    int       `gorm:"column:status;default:0;not null;comment:状态：0: 未使用，1: 已使用，2: 已过期"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime;not null"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime;not null"`
+	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID    *uint     `gorm:"column:user_id;index;comment:关联用户ID" json:"user_id,omitempty"` // Foreign key to User model
+	Token     string    `gorm:"column:token;type:varchar(255);unique;not null;comment:临时token" json:"token"`
+	Status    int       `gorm:"column:status;default:0;not null;comment:状态：0: 未使用，1: 已使用，2: 已过期" json:"status"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime;not null" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime;not null" json:"updated_at"`
 }
 
 // TableName sets the custom table name for the TempToken model.

@@ -10,33 +10,34 @@ import (
 )
 
 // UserSubscription represents the user's VPN subscription record model.
+// UserSubscription represents the user's subscription details.
 type UserSubscription struct {
-	ID               uint         `gorm:"primaryKey;autoIncrement"`
-	UserID           *uint        `gorm:"column:user_id;index;comment:关联用户ID"`             // Foreign key to User model
-	User             User         `gorm:"foreignKey:UserID"`                               // GORM will automatically manage the association
-	SubscriptionID   *uint        `gorm:"column:subscription_id;index;comment:关联订阅套餐ID"`   // Foreign key to Subscription model
-	Subscription     Subscription `gorm:"foreignKey:SubscriptionID"`                       // GORM will automatically manage the association
-	TempTokenID      *uint        `gorm:"column:temp_token_id;index;comment:关联临时token ID"` // Foreign key to TempToken model
-	TempToken        TempToken    `gorm:"foreignKey:TempTokenID"`                          // GORM will automatically manage the association
-	StartDate        time.Time    `gorm:"column:start_date;autoCreateTime;not null;comment:开始时间"`
-	EndDate          time.Time    `gorm:"column:end_date;not null;comment:订阅到期时间"`
-	Status           string       `gorm:"column:status;type:varchar(20);default:pending;not null;comment:订阅状态"`
-	PaymentStatus    string       `gorm:"column:payment_status;type:varchar(20);default:pending;not null;comment:支付状态"`
-	PaymentAmount    float64      `gorm:"column:payment_amount;type:decimal(10,2);not null;comment:支付金额"`
-	PaymentMethod    string       `gorm:"column:payment_method;type:varchar(50);comment:如：支付宝、微信、银行卡等"`
-	PaymentTime      *time.Time   `gorm:"column:payment_time;comment:支付时间"`
-	TransactionID    string       `gorm:"column:transaction_id;type:varchar(100);comment:第三方支付平台的交易ID"`
-	UsedTraffic      int64        `gorm:"column:used_traffic;default:0;not null;comment:已使用的流量（GB）"`
-	TotalTraffic     *int64       `gorm:"column:total_traffic;comment:套餐总流量（GB）"`
-	LastUsed         *time.Time   `gorm:"column:last_used;comment:最后使用时间"`
-	CursorAskUsage   int          `gorm:"column:cursor_ask_usage;default:0;not null;comment:AI调用次数"`
-	CursorTabUsage   int          `gorm:"column:cursor_tab_usage;default:0;not null;comment:AI标签调用次数"`
-	CursorTokenUsage int          `gorm:"column:cursor_token_usage;default:0;not null;comment:AI调用token使用量"`
-	VPNConfig        JSONMap      `gorm:"column:vpn_config;type:jsonb;default:'{}';comment:VPN连接配置信息"`
-	ServerAssigned   string       `gorm:"column:server_assigned;type:varchar(100);comment:分配给用户的服务器"`
-	Notes            string       `gorm:"column:notes;type:text;comment:管理员备注信息"`
-	CreatedAt        time.Time    `gorm:"column:created_at;autoCreateTime;not null"`
-	UpdatedAt        time.Time    `gorm:"column:updated_at;autoUpdateTime;not null"`
+	ID               uint         `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID           *uint        `gorm:"column:user_id;index;comment:关联用户ID" json:"user_id"`
+	User             User         `gorm:"foreignKey:UserID" json:"user"`
+	SubscriptionID   *uint        `gorm:"column:subscription_id;index;comment:关联订阅套餐ID" json:"subscription_id"`
+	Subscription     Subscription `gorm:"foreignKey:SubscriptionID" json:"subscription"`
+	TempTokenID      *uint        `gorm:"column:temp_token_id;index;comment:关联临时token ID" json:"temp_token_id"`
+	TempToken        TempToken    `gorm:"foreignKey:TempTokenID" json:"temp_token"`
+	StartDate        time.Time    `gorm:"column:start_date;autoCreateTime;not null;comment:开始时间" json:"start_date"`
+	EndDate          time.Time    `gorm:"column:end_date;not null;comment:订阅到期时间" json:"end_date"`
+	Status           string       `gorm:"column:status;type:varchar(20);default:pending;not null;comment:订阅状态" json:"status"`
+	PaymentStatus    string       `gorm:"column:payment_status;type:varchar(20);default:pending;not null;comment:支付状态" json:"payment_status"`
+	PaymentAmount    float64      `gorm:"column:payment_amount;type:decimal(10,2);not null;comment:支付金额" json:"payment_amount"`
+	PaymentMethod    string       `gorm:"column:payment_method;type:varchar(50);comment:如：支付宝、微信、银行卡等" json:"payment_method"`
+	PaymentTime      *time.Time   `gorm:"column:payment_time;comment:支付时间" json:"payment_time"`
+	TransactionID    string       `gorm:"column:transaction_id;type:varchar(100);comment:第三方支付平台的交易ID" json:"transaction_id"`
+	UsedTraffic      int64        `gorm:"column:used_traffic;default:0;not null;comment:已使用的流量（GB）" json:"used_traffic"`
+	TotalTraffic     *int64       `gorm:"column:total_traffic;comment:套餐总流量（GB）" json:"total_traffic"`
+	LastUsed         *time.Time   `gorm:"column:last_used;comment:最后使用时间" json:"last_used"`
+	CursorAskUsage   int          `gorm:"column:cursor_ask_usage;default:0;not null;comment:AI调用次数" json:"cursor_ask_usage"`
+	CursorTabUsage   int          `gorm:"column:cursor_tab_usage;default:0;not null;comment:AI标签调用次数" json:"cursor_tab_usage"`
+	CursorTokenUsage int          `gorm:"column:cursor_token_usage;default:0;not null;comment:AI调用token使用量" json:"cursor_token_usage"`
+	VPNConfig        JSONMap      `gorm:"column:vpn_config;type:jsonb;default:'{}';comment:VPN连接配置信息" json:"vpn_config"`
+	ServerAssigned   string       `gorm:"column:server_assigned;type:varchar(100);comment:分配给用户的服务器" json:"server_assigned"`
+	Notes            string       `gorm:"column:notes;type:text;comment:管理员备注信息" json:"notes"`
+	CreatedAt        time.Time    `gorm:"column:created_at;autoCreateTime;not null" json:"created_at"`
+	UpdatedAt        time.Time    `gorm:"column:updated_at;autoUpdateTime;not null" json:"updated_at"`
 }
 
 // TableName sets the custom table name for the UserSubscription model.

@@ -173,7 +173,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
-					orgAuth := string(h.RawValue)
+
 					userService := service.GetUserServiceInstance()
 					var userInfo *models.User
 					// userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
@@ -184,6 +184,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 							log.Printf("Error getting user by inner token: %v", err)
 						}
 					}
+					orgAuth := string(h.RawValue)
 					if userInfo == nil {
 						userInfo, err = userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
 						if err != nil {
@@ -205,9 +206,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 							log.Printf("Failed to send immediate response: %v", err)
 						}
 						return err
-					} else {
-						httpRecrod.InnerTokenId = userInfo.InnerToken
 					}
+
 					dispatcherService := service.GetDispatchInstance()
 					cursorAccount, err = dispatcherService.DispatchTokenForUser(ctx, userInfo)
 					if err != nil || cursorAccount == nil {
