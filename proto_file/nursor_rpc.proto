@@ -14,22 +14,17 @@ service ExternalProcessor {
 
 message ProcessingRequest {
   oneof request {
-    HttpHeaders request_headers = 1;
-    HttpBody request_body = 2;
+    HttpHeaders request_headers = 2;
     HttpHeaders response_headers = 3;
-    HttpBody response_body = 4;
-    HttpTrailers request_trailers = 5;
-    HttpTrailers response_trailers = 6;
+    HttpBody request_body = 4;
+    HttpBody response_body = 5;
+    HttpTrailers request_trailers = 6;
+    HttpTrailers response_trailers = 7;
   }
-
-  // 可选字段：通知处理模式（首次连接时发送）
-  ProcessingMode processing_mode = 7;
-
-  // 可选字段：包含请求上下文信息
-  Attributes attributes = 8;
-
   // 可选字段：用于传递动态元数据（类似 Envoy Filter 的 Metadata）
-  map<string, string> request_metadata = 9;
+  // map<string, string> request_metadata = 8;
+  // 可选字段：包含请求上下文信息
+  // Attributes attributes = 9;
 }
 
 // --------- 响应部分 ---------
