@@ -138,8 +138,9 @@ func (ds *DispatchService) IncrTokenUsage(ctx context.Context, innerToken string
 	}
 	// 保存用户使用次数
 	go func() {
-		user.Usage++
-		ds.userService.db.WithContext(ctx).Save(&user)
+		newCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ds.userService.IncrementTokenUsage(newCtx, innerToken)
 	}()
 	logrus.Infof("IncrTokenUsage: user %d, tokenID %s, usage %d", user.ID, tokenID, user.Usage)
 	return nil
@@ -229,7 +230,7 @@ func KeepTokenQueueAvailable(ctx context.Context) {
 func init() {
 	go func() {
 		for {
-			KeepTokenQueueAvailable(context.TODO())
+			// KeepTokenQueueAvailable(context.TODO())
 			time.Sleep(10 * time.Second)
 		}
 	}()

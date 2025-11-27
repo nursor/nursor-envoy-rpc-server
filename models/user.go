@@ -25,23 +25,23 @@ const (
 
 // User represents the user_user table in the database.
 type User struct {
-	ID             int            `gorm:"primaryKey;column:id"`
-	IsDispatched   bool           `gorm:"default:false;column:is_dispatched"`
-	IsFree         bool           `gorm:"default:false;column:is_free"`
-	Name           string         `gorm:"type:varchar(255);column:name"`
-	Email          string         `gorm:"type:varchar(255);unique;column:email"`
-	Password       string         `gorm:"type:varchar(255);column:password"`
-	AccessToken    string         `gorm:"type:varchar(255);column:access_token"`
-	InnerToken     string         `gorm:"type:varchar(255);column:inner_token"`
-	MembershipType MembershipType `gorm:"type:varchar(255);column:membership_type"`
-	Limit          int            `gorm:"default:10;column:limit"`
-	SalesChannel   *SalesChannel  `gorm:"type:varchar(255);column:sales_channel"`
-	ClientID       *string        `gorm:"type:varchar(255);column:client_id"`
-	OrderID        *string        `gorm:"type:varchar(255);column:order_id"`
-	Usage          int            `gorm:"default:0;column:usage"`
-	ExpiredAt      *time.Time     `gorm:"column:expired_at"`
-	CreatedAt      time.Time      `gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt      time.Time      `gorm:"autoUpdateTime;column:updated_at"`
+	ID             int            `gorm:"primaryKey;column:id" json:"id"`
+	IsDispatched   bool           `gorm:"default:false;column:is_dispatched" json:"is_dispatched"`
+	IsFree         bool           `gorm:"default:false;column:is_free" json:"is_free"`
+	Name           string         `gorm:"type:varchar(255);column:name" json:"name"`
+	Email          string         `gorm:"type:varchar(255);unique;column:email" json:"email"`
+	Password       string         `gorm:"type:varchar(255);column:password" json:"password"`
+	AccessToken    string         `gorm:"type:varchar(255);column:access_token" json:"access_token"`
+	InnerToken     string         `gorm:"type:varchar(255);column:inner_token" json:"inner_token"`
+	MembershipType MembershipType `gorm:"type:varchar(255);column:membership_type" json:"membership_type"`
+	Limit          int            `gorm:"default:10;column:limit" json:"limit"`
+	SalesChannel   *SalesChannel  `gorm:"type:varchar(255);column:sales_channel" json:"sales_channel"`
+	ClientID       *string        `gorm:"type:varchar(255);column:client_id" json:"client_id"`
+	OrderID        *string        `gorm:"type:varchar(255);column:order_id" json:"order_id"`
+	Usage          int            `gorm:"default:0;column:usage" json:"usage"`
+	ExpiredAt      *time.Time     `gorm:"column:expired_at" json:"expired_at"`
+	CreatedAt      time.Time      `gorm:"autoCreateTime;column:created_at" json:"created_at"`
+	UpdatedAt      time.Time      `gorm:"autoUpdateTime;column:updated_at" json:"updated_at"`
 }
 
 // TableName specifies the table name for User.
