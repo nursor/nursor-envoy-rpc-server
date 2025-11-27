@@ -9,18 +9,22 @@ type MembershipType string
 
 const (
 	MembershipTypeFree       MembershipType = "Free"
+	MembershipTypeTrial      MembershipType = "Trial"
 	MembershipTypePremium    MembershipType = "Premium"
 	MembershipTypeEnterprise MembershipType = "Enterprise"
+	MembershipTypeAnonymous  MembershipType = "Anonymous"
 )
 
 // SalesChannel defines the possible sales channels as an enum-like string.
 type SalesChannel string
 
 const (
-	SalesChannelTaoBao  SalesChannel = "TaoBao"
-	SalesChannelWeiShou SalesChannel = "WeiShou"
-	SalesChannelWeiXin  SalesChannel = "WeiXin"
-	SalesChannelXianYu  SalesChannel = "XianYu"
+	SalesChannelTaoBao   SalesChannel = "TaoBao"
+	SalesChannelWeiShou  SalesChannel = "WeiShou"
+	SalesChannelWeiXin   SalesChannel = "WeiXin"
+	SalesChannelXianYu   SalesChannel = "XianYu"
+	SalesChannelOther    SalesChannel = "Other"
+	SalesChannelOfficial SalesChannel = "official"
 )
 
 // User represents the user_user table in the database.
@@ -30,18 +34,19 @@ type User struct {
 	IsFree         bool           `gorm:"default:false;column:is_free" json:"is_free"`
 	Name           string         `gorm:"type:varchar(255);column:name" json:"name"`
 	Email          string         `gorm:"type:varchar(255);unique;column:email" json:"email"`
-	Password       string         `gorm:"type:varchar(255);column:password" json:"password"`
-	AccessToken    string         `gorm:"type:varchar(255);column:access_token" json:"access_token"`
 	InnerToken     string         `gorm:"type:varchar(255);column:inner_token" json:"inner_token"`
 	MembershipType MembershipType `gorm:"type:varchar(255);column:membership_type" json:"membership_type"`
-	Limit          int            `gorm:"default:10;column:limit" json:"limit"`
 	SalesChannel   *SalesChannel  `gorm:"type:varchar(255);column:sales_channel" json:"sales_channel"`
 	ClientID       *string        `gorm:"type:varchar(255);column:client_id" json:"client_id"`
 	OrderID        *string        `gorm:"type:varchar(255);column:order_id" json:"order_id"`
-	Usage          int            `gorm:"default:0;column:usage" json:"usage"`
 	ExpiredAt      *time.Time     `gorm:"column:expired_at" json:"expired_at"`
 	CreatedAt      time.Time      `gorm:"autoCreateTime;column:created_at" json:"created_at"`
 	UpdatedAt      time.Time      `gorm:"autoUpdateTime;column:updated_at" json:"updated_at"`
+	// Django auth required fields
+	IsActive    bool       `gorm:"default:true;column:is_active" json:"is_active"`
+	IsStaff     bool       `gorm:"default:false;column:is_staff" json:"is_staff"`
+	IsSuperuser bool       `gorm:"default:false;column:is_superuser" json:"is_superuser"`
+	LastLogin   *time.Time `gorm:"column:last_login" json:"last_login"`
 }
 
 // TableName specifies the table name for User.
@@ -52,32 +57,4 @@ func (User) TableName() string {
 // String returns a string representation of the User.
 func (u User) String() string {
 	return u.Name
-}
-
-// ModelDumpJSON serializes the User struct into a JSON-compatible map.
-func (u User) ModelDumpJSON() map[string]interface{} {
-	expiredAt := ""
-	if u.ExpiredAt != nil {
-		expiredAt = u.ExpiredAt.Format(time.RFC3339)
-	}
-	createdAt := u.CreatedAt.Format(time.RFC3339)
-	updatedAt := u.UpdatedAt.Format(time.RFC3339)
-
-	return map[string]interface{}{
-		"id":              u.ID,
-		"name":            u.Name,
-		"email":           u.Email,
-		"password":        u.Password,
-		"access_token":    u.AccessToken,
-		"refresh_token":   u.InnerToken,
-		"membership_type": u.MembershipType,
-		"limit":           u.Limit,
-		"sales_channel":   u.SalesChannel,
-		"client_id":       u.ClientID,
-		"order_id":        u.OrderID,
-		"usage":           u.Usage,
-		"expired_at":      expiredAt,
-		"created_at":      createdAt,
-		"updated_at":      updatedAt,
-	}
 }

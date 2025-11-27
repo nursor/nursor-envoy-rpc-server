@@ -8,10 +8,9 @@ import (
 	"net"
 	"nursor-envoy-rpc/models"
 	"nursor-envoy-rpc/models/nursor"
-	"nursor-envoy-rpc/provider"
+
 	"nursor-envoy-rpc/service"
 	"nursor-envoy-rpc/utils"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -30,9 +29,6 @@ type extProcServer struct {
 	extprocv3.UnimplementedExternalProcessorServer
 }
 
-// eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU
-var defaultToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU"
-
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
 	var httpRecrod = nursor.NewRequestRecord()
 	var isChatRequest = false
@@ -43,26 +39,26 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 		go func() {
 			log.Printf("Stream closed after %s", time.Since(timeA))
 			if httpRecrod != nil {
-				provider.PushHttpRequestToCache(httpRecrod)
+				// Push HTTP record to external service
+				httpRecordService := service.GetHttpRecordInstance()
+				if err := httpRecordService.PushHttpRecord(context.Background(), httpRecrod); err != nil {
+					log.Printf("Failed to push HTTP record: %v", err)
+				}
 			}
 			if isChatRequest {
 				if !isChatHasException {
 					dispatcherService := service.GetDispatchInstance()
-					dispatcherService.IncrTokenUsage(context.Background(), httpRecrod.InnerTokenId)
+					dispatcherService.IncrTokenUsage(context.Background(), httpRecrod.AccountId)
 				} else {
 					dispatcherService := service.GetDispatchInstance()
-					tokenID, err := dispatcherService.GetTokenIdByInnerToken(context.Background(), httpRecrod.InnerTokenId)
-					if err != nil {
-						log.Printf("Error getting token ID: %v", err)
-					}
-					dispatcherService.HandleTokenExpired(context.Background(), tokenID)
+					dispatcherService.HandleTokenExpired(context.Background(), httpRecrod.AccountId)
 				}
 
 			}
 		}()
 	}()
 
-	var cursorAccount *models.Cursor
+	var account *models.AccountInfo
 
 	for {
 		req, err := stream.Recv()
@@ -80,6 +76,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			log.Printf("Error receiving from stream: %v", err)
 			return err
 		}
+		var user *models.User
+		var innerToken string
 
 		switch r := req.Request.(type) {
 		case *extprocv3.ProcessingRequest_RequestHeaders:
@@ -88,14 +86,29 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			isAuthHeaderExisted := false
 
 			// 从headers中提取nursor-token
-			var innerToken string
+
 			for _, h := range headers.Headers {
 				if strings.ToLower(h.Key) == "nursor-token" {
 					innerToken = string(h.RawValue)
-					httpRecrod.InnerTokenId = innerToken
+					userService := service.GetUserServiceInstance()
+					user, err = userService.GetUserByInnerToken(ctx, innerToken)
+					if err != nil {
+						log.Printf("Error getting user by inner token: %v", err)
+						return err
+					}
+					httpRecrod.UserId = user.ID
 					log.Printf("Found and set nursor-token: %s", innerToken)
 					break
 				}
+			}
+			if user == nil {
+				log.Println("User not found")
+				resp := &extprocv3.ProcessingResponse{
+					Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+						ImmediateResponse: &extprocv3.ImmediateResponse{},
+					},
+				}
+				return stream.Send(resp)
 			}
 
 			for _, h := range headers.Headers {
@@ -182,13 +195,6 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						userInfo, err = userService.GetUserByInnerToken(ctx, innerToken)
 						if err != nil {
 							log.Printf("Error getting user by inner token: %v", err)
-						}
-					}
-					orgAuth := string(h.RawValue)
-					if userInfo == nil {
-						userInfo, err = userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
-						if err != nil {
-							log.Printf("Error parsing token: %v", err)
 							resp := utils.GetResponseForErr(err)
 							// 发送响应，终止流程
 							if err := stream.Send(resp); err != nil {
@@ -198,19 +204,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						}
 					}
 
-					if userInfo == nil {
-						log.Println("Token not valid")
-						resp := utils.GetResponseForExpireError()
-						// 发送响应，终止流程
-						if err := stream.Send(resp); err != nil {
-							log.Printf("Failed to send immediate response: %v", err)
-						}
-						return err
-					}
-
 					dispatcherService := service.GetDispatchInstance()
-					cursorAccount, err = dispatcherService.DispatchTokenForUser(ctx, userInfo)
-					if err != nil || cursorAccount == nil {
+					account, err = dispatcherService.GetAccountByUserId(ctx, userInfo.ID)
+					if err != nil || account == nil {
 						log.Printf("Error dispatching token: %v", err)
 						resp := utils.GetResponseForErr(err)
 						// 发送响应，终止流程
@@ -219,9 +215,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						}
 						return err
 					}
-					originTokenSplited := strings.Split(orgAuth, ".")
-					newTokenSplited := strings.Split(*cursorAccount.AccessToken, ".")
-					log.Printf("Token inner and outside: %s,<------------->%s\n", originTokenSplited[len(originTokenSplited)-1], newTokenSplited[len(newTokenSplited)-1])
+					// Set account ID in HTTP record
+					httpRecrod.AccountId = account.ID
 				}
 				// 聊天请求单独处理
 				if strings.Contains(string(h.RawValue), "StreamUnifiedChatWithTools") {
@@ -276,9 +271,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 									SetHeaders: []*corev3.HeaderValueOption{
 										{
 											Header: &corev3.HeaderValue{
-												Key: "authorization",
-												// RawValue: []byte(fmt.Sprintf("Bearer %s", *cursorAccount.AccessToken)),
-												RawValue: []byte(fmt.Sprintf("Bearer %s", defaultToken)),
+												Key:      "authorization",
+												RawValue: []byte(fmt.Sprintf("Bearer %s", account.AccessToken)),
 											},
 											// TODO： 是不是还需要修改x-cleint-id字段？
 											Append: wrapperspb.Bool(false),
@@ -286,7 +280,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 										{
 											Header: &corev3.HeaderValue{
 												Key:      "x-client-key",
-												RawValue: []byte("c1193cf81a1778fd7e4e522c8f3ae4d7b2b856a81e8d8860a5c589dc2774ad26"),
+												RawValue: []byte(account.ClientKey),
 											},
 											Append: wrapperspb.Bool(false),
 										},
@@ -404,29 +398,6 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 }
 
 func main() {
-
-	envToken := os.Getenv("TOKEN")
-	if envToken != "" {
-		defaultToken = envToken
-	}
-
-	// 启动Kafka消费者
-	log.Println("Starting Kafka consumer...")
-	kafkaConsumer := provider.GetKafkaConsumer()
-	if err := kafkaConsumer.Start(); err != nil {
-		log.Fatalf("Failed to start Kafka consumer: %v", err)
-	}
-	log.Println("Kafka consumer started successfully")
-
-	// 设置优雅关闭
-	defer func() {
-		log.Println("Shutting down Kafka consumer...")
-		if err := kafkaConsumer.Stop(); err != nil {
-			log.Printf("Error stopping Kafka consumer: %v", err)
-		}
-		log.Println("Kafka consumer stopped")
-	}()
-
 	listenAddr := ":8080"
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
