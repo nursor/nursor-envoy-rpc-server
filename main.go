@@ -30,6 +30,7 @@ type extProcServer struct {
 	extprocv3.UnimplementedExternalProcessorServer
 }
 
+// eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU
 var defaultToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlZSS0JWMVNGOEFDNVdYNFQwNEZHSlpHIiwidGltZSI6IjE3NTE5NTM3NzgiLCJyYW5kb21uZXNzIjoiZDNjZTQzZWYtNWFhYy00Zjc4IiwiZXhwIjoxNzU3MTM3Nzc4LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.b6BONRTB1NyCOT9FskYRpzgr_eIKKSc5BKO43anDnvU"
 
 func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer) error {
@@ -42,7 +43,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 		go func() {
 			log.Printf("Stream closed after %s", time.Since(timeA))
 			if httpRecrod != nil {
-				provider.PushHttpRequestToDB(httpRecrod)
+				provider.PushHttpRequestToCache(httpRecrod)
 			}
 			if isChatRequest {
 				if !isChatHasException {
@@ -86,6 +87,17 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 			headers := r.RequestHeaders.GetHeaders()
 			isAuthHeaderExisted := false
 
+			// 从headers中提取nursor-token
+			var innerToken string
+			for _, h := range headers.Headers {
+				if strings.ToLower(h.Key) == "nursor-token" {
+					innerToken = string(h.RawValue)
+					httpRecrod.InnerTokenId = innerToken
+					log.Printf("Found and set nursor-token: %s", innerToken)
+					break
+				}
+			}
+
 			for _, h := range headers.Headers {
 				httpRecrod.AddRequestHeader(h.Key, string(h.RawValue))
 				if strings.Contains(h.Key, ":authority") {
@@ -102,25 +114,90 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 							return err
 						}
 						return nil
+					} else if !strings.Contains(string(h.RawValue), "cursor.sh") && !strings.Contains(string(h.RawValue), "cursor.com") {
+						// log.Println("not cursor.sh or cursor.com", string(h.RawValue))
+						// 只处理cursor.sh和cursor.com的请求
+						resp := &extprocv3.ProcessingResponse{
+							Response: &extprocv3.ProcessingResponse_RequestHeaders{
+								RequestHeaders: &extprocv3.HeadersResponse{
+									Response: &extprocv3.CommonResponse{
+										HeaderMutation: &extprocv3.HeaderMutation{},
+									},
+								},
+							},
+						}
+
+						if err := stream.Send(resp); err != nil {
+							log.Printf("Error sending response: %v", err)
+							return err
+						}
+						return nil
 					}
+
+				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "AuthService/GetEmail") {
+					resp := &extprocv3.ProcessingResponse{
+						Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+							ImmediateResponse: &extprocv3.ImmediateResponse{
+								Body: string([]byte{
+									0x0a, 0x10, // 前两个字节
+									0x6a, 0x69, 0x6d, 0x6d, 0x79, 0x6c, 0x65, 0x65, // jimmylee
+									0x40,                                     // @
+									0x6d, 0x69, 0x74, 0x2e, 0x65, 0x64, 0x75, // mit.edu
+									0x10, 0x01, // 后两个字节
+								}),
+							},
+						},
+					}
+
+					if err := stream.Send(resp); err != nil {
+						log.Printf("Error sending response: %v", err)
+						return err
+					}
+					return nil
+				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "GetTeam") {
+					fmt.Print("in get Eamil")
+				} else if strings.Contains(h.Key, ":path") && strings.Contains(string(h.RawValue), "ReportBug") {
+					resp := &extprocv3.ProcessingResponse{
+						Response: &extprocv3.ProcessingResponse_ImmediateResponse{
+							ImmediateResponse: &extprocv3.ImmediateResponse{},
+						},
+					}
+
+					if err := stream.Send(resp); err != nil {
+						log.Printf("Error sending response: %v", err)
+						return err
+					}
+					return nil
 				}
+
 				if strings.ToLower(h.Key) == "authorization" && strings.Contains(string(h.RawValue), ".") {
 					isAuthHeaderExisted = true
 					log.Println("Authorization header found and replaced")
-					orgAuth := string(h.RawValue)
+
 					userService := service.GetUserServiceInstance()
+					var userInfo *models.User
 					// userInfo, err := userService.CheckAndGetUserFromInnerToken(ctx, orgAuth)
 					// 新版本，使用用户数据库的绑定token
-					userInfo, err := userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
-					if err != nil {
-						log.Printf("Error parsing token: %v", err)
-						resp := utils.GetResponseForErr(err)
-						// 发送响应，终止流程
-						if err := stream.Send(resp); err != nil {
-							log.Printf("Failed to send immediate response: %v", err)
+					if innerToken != "" {
+						userInfo, err = userService.GetUserByInnerToken(ctx, innerToken)
+						if err != nil {
+							log.Printf("Error getting user by inner token: %v", err)
 						}
-						return err
 					}
+					orgAuth := string(h.RawValue)
+					if userInfo == nil {
+						userInfo, err = userService.CheckAndGetUserFromBindingtoken(ctx, orgAuth)
+						if err != nil {
+							log.Printf("Error parsing token: %v", err)
+							resp := utils.GetResponseForErr(err)
+							// 发送响应，终止流程
+							if err := stream.Send(resp); err != nil {
+								log.Printf("Failed to send immediate response: %v", err)
+							}
+							return err
+						}
+					}
+
 					if userInfo == nil {
 						log.Println("Token not valid")
 						resp := utils.GetResponseForExpireError()
@@ -129,9 +206,8 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 							log.Printf("Failed to send immediate response: %v", err)
 						}
 						return err
-					} else {
-						httpRecrod.InnerTokenId = userInfo.InnerToken
 					}
+
 					dispatcherService := service.GetDispatchInstance()
 					cursorAccount, err = dispatcherService.DispatchTokenForUser(ctx, userInfo)
 					if err != nil || cursorAccount == nil {
@@ -178,7 +254,9 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 					Response: &extprocv3.ProcessingResponse_RequestHeaders{
 						RequestHeaders: &extprocv3.HeadersResponse{
 							Response: &extprocv3.CommonResponse{
-								HeaderMutation: &extprocv3.HeaderMutation{},
+								HeaderMutation: &extprocv3.HeaderMutation{
+									RemoveHeaders: []string{"nursor-token"},
+								},
 							},
 						},
 					},
@@ -194,7 +272,7 @@ func (s *extProcServer) Process(stream extprocv3.ExternalProcessor_ProcessServer
 						RequestHeaders: &extprocv3.HeadersResponse{
 							Response: &extprocv3.CommonResponse{
 								HeaderMutation: &extprocv3.HeaderMutation{
-									RemoveHeaders: []string{"authorization"},
+									RemoveHeaders: []string{"authorization", "nursor-token"},
 									SetHeaders: []*corev3.HeaderValueOption{
 										{
 											Header: &corev3.HeaderValue{
@@ -331,6 +409,23 @@ func main() {
 	if envToken != "" {
 		defaultToken = envToken
 	}
+
+	// 启动Kafka消费者
+	log.Println("Starting Kafka consumer...")
+	kafkaConsumer := provider.GetKafkaConsumer()
+	if err := kafkaConsumer.Start(); err != nil {
+		log.Fatalf("Failed to start Kafka consumer: %v", err)
+	}
+	log.Println("Kafka consumer started successfully")
+
+	// 设置优雅关闭
+	defer func() {
+		log.Println("Shutting down Kafka consumer...")
+		if err := kafkaConsumer.Stop(); err != nil {
+			log.Printf("Error stopping Kafka consumer: %v", err)
+		}
+		log.Println("Kafka consumer stopped")
+	}()
 
 	listenAddr := ":8080"
 	lis, err := net.Listen("tcp", listenAddr)
