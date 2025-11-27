@@ -228,7 +228,7 @@ func (ds *DispatchService) HandleTokenExpired(ctx context.Context, AccountId int
 	if url[len(url)-1] != '/' {
 		url += "/"
 	}
-	url += fmt.Sprintf("account/%d/disable", AccountId)
+	url += fmt.Sprintf("account/%d/disable-with-check", AccountId)
 
 	// Create HTTP request with empty body
 	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
